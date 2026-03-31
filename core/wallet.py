@@ -16,7 +16,10 @@ class WalletManager:
 
     def __init__(self, private_key: str):
         """Initialize with a private key string."""
-        self._account = Account.from_key(private_key)
+        try:
+            self._account = Account.from_key(private_key)
+        except Exception:
+            raise ValueError("Invalid private key") from None
 
     @classmethod
     def from_env(cls, env_var: str = "PRIVATE_KEY") -> "WalletManager":
@@ -41,6 +44,8 @@ class WalletManager:
 
     def sign_message(self, message: str) -> SignedMessage:
         """Sign an arbitrary message (with EIP-191 prefix)."""
+        if not isinstance(message, str):
+            raise TypeError("Message must be a string.")
         if not message:
             raise ValueError("Message cannot be empty.")
         msg = encode_defunct(text=message)
@@ -48,6 +53,12 @@ class WalletManager:
 
     def sign_typed_data(self, domain: dict, types: dict, value: dict) -> SignedMessage:
         """Sign EIP-712 typed data (used by many DeFi protocols)."""
+        if not isinstance(domain, dict):
+            raise TypeError("Domain must be a dict.")
+        if not isinstance(types, dict):
+            raise TypeError("Types must be a dict.")
+        if not isinstance(value, dict):
+            raise TypeError("Value must be a dict.")
         if not domain:
             raise ValueError("Domain cannot be empty.")
         if not types:
@@ -58,10 +69,13 @@ class WalletManager:
 
     def sign_transaction(self, tx: dict) -> SignedTransaction:
         """Sign a transaction dict."""
+        if not isinstance(tx, dict):
+            raise TypeError("Transaction must be a dict.")
         if not tx:
             raise ValueError("Transaction cannot be empty.")
         if "to" not in tx:
             raise ValueError("Transaction must have 'to' field.")
+
         return self._account.sign_transaction(tx)
 
     def __repr__(self) -> str:

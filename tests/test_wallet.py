@@ -66,3 +66,24 @@ def test_sign_typed_data_empty_domain_raises():
 def test_address_is_checksummed():
     wallet = WalletManager(TEST_PRIVATE_KEY)
     assert wallet.address == Account.from_key(TEST_PRIVATE_KEY).address
+
+def test_exception_does_not_expose_private_key():
+    try:
+        WalletManager("invalid_key")
+    except Exception as e:
+        assert TEST_PRIVATE_KEY not in str(e)
+
+def test_sign_message_invalid_type_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(TypeError):
+        wallet.sign_message(123)
+
+def test_sign_transaction_invalid_type_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(TypeError):
+        wallet.sign_transaction("not a dict")
+
+def test_sign_typed_data_invalid_type_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(TypeError):
+        wallet.sign_typed_data("not a dict", {}, {})
