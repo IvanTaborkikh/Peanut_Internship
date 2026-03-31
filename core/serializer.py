@@ -1,5 +1,5 @@
-from typing import Any
 import json
+from typing import Any
 from eth_hash.auto import keccak
 
 
