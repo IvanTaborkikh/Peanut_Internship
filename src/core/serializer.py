@@ -17,7 +17,9 @@ class CanonicalSerializer:
     @staticmethod
     def _check_no_floats(obj: Any) -> None:
         if isinstance(obj, float):
-            raise ValueError("Floating point numbers are not allowed in canonical serialization.")
+            raise ValueError(
+                "Floating point numbers are not allowed in canonical serialization."
+            )
         elif isinstance(obj, dict):
             for value in obj.values():
                 CanonicalSerializer._check_no_floats(value)
@@ -28,7 +30,9 @@ class CanonicalSerializer:
     @staticmethod
     def serialize(obj: Any) -> bytes:
         CanonicalSerializer._check_no_floats(obj)
-        return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+        return json.dumps(
+            obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
 
     @staticmethod
     def hash(obj: Any) -> bytes:

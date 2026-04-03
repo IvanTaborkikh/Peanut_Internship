@@ -3,6 +3,7 @@ from eth_account.datastructures import SignedTransaction, SignedMessage
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
+
 class WalletManager:
     """
     Manages wallet operations: key loading, signing, verification.
