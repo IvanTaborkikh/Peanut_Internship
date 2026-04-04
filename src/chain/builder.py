@@ -79,6 +79,16 @@ class TransactionBuilder:
             raise ValueError("Transaction must have a 'value'.")
         if self._nonce is None:
             self._nonce = self._client.get_nonce(Address(self._wallet.address))
+
+        if self._max_fee_per_gas is None or self._max_priority_fee is None:
+            gas_price = self._client.get_gas_price()
+            self._max_fee_per_gas = gas_price.get_max_fee(priority="medium")
+            self._max_priority_fee = gas_price.priority_fee_medium
+
+        if self._gas_limit is None:
+            partial = self._build_partial()
+            self._gas_limit = self._client.estimate_gas(partial)
+
         return TransactionRequest(
             to=self._to,
             value=self._value,

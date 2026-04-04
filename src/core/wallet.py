@@ -28,6 +28,8 @@ class WalletManager:
         private_key = os.getenv(env_var)
         if not private_key:
             raise ValueError(f"Environment variable '{env_var}' is not set.")
+        if not private_key.startswith("0x"):
+            raise ValueError(f"Private key in '{env_var}' must start with '0x'.")
         return cls(private_key)
 
     @classmethod
@@ -75,6 +77,8 @@ class WalletManager:
         if not tx:
             raise ValueError("Transaction cannot be empty.")
         if "to" not in tx:
+            raise ValueError("Transaction must have 'to' field.")
+        if "value" not in tx:
             raise ValueError("Transaction must have 'to' field.")
 
         return self._account.sign_transaction(tx)
