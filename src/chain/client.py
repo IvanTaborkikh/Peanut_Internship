@@ -83,11 +83,10 @@ class ChainClient:
 
     def send_transaction(self, signed_tx: bytes) -> str:
         """Send and return tx hash. Does NOT wait for confirmation."""
-        tx_hash = self._retry(self._web3.eth.send_raw_transaction, signed_tx)
-        result = tx_hash.hex()
-        if not result.startswith("0x"):
-            result = "0x" + result
-        return result
+        tx_hash_hex = self._retry(self._web3.eth.send_raw_transaction, signed_tx).hex()
+        if not tx_hash_hex.startswith("0x"):
+            tx_hash_hex = "0x" + tx_hash_hex
+        return tx_hash_hex
 
     def wait_for_receipt(
         self, tx_hash: str, timeout: int = 120, poll_interval: float = 1.0

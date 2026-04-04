@@ -11,6 +11,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Optional
 
+import requests
 from web3 import Web3
 
 from src.chain.client import ChainClient
@@ -164,6 +165,12 @@ def _extract_revert_reason(e: Exception) -> str:
         return clean.strip("'").strip('"')
     return msg
 
+def get_eth_price_usd() -> float:
+    response = requests.get(
+        "https://api.coingecko.com/api/v3/simple/price",
+        params={"ids": "ethereum", "vs_currencies": "usd"}
+    )
+    return response.json()["ethereum"]["usd"]
 
 # ── Token metadata cache ──────────────────────────────────────────────────────
 
@@ -251,19 +258,30 @@ def analyze(tx_hash: str, rpc_url: str) -> None:
         gas_used = receipt.gas_used
         gas_pct = (gas_used / gas_limit * 100) if gas_limit else 0
         eff_price = receipt.effective_gas_price
-        base_fee = tx.get("maxFeePerGas") or tx.get("gasPrice") or eff_price
-        priority_fee = tx.get("maxPriorityFeePerGas") or 0
         fee_eth = _wei_to_eth(gas_used * eff_price)
+        eth_price_USD = get_eth_price_usd()
+        fee_usd = fee_eth * Decimal(eth_price_USD)
+
+        is_legacy = block.get("baseFeePerGas") is None
 
         print()
         print("Gas Analysis")
         print("-" * 40)
         print(f"Gas Limit:      {_format_number(gas_limit)}")
         print(f"Gas Used:       {_format_number(gas_used)} ({gas_pct:.2f}%)")
-        print(f"Base Fee:       {_wei_to_gwei(base_fee):.6f} gwei")
-        print(f"Priority Fee:   {_wei_to_gwei(priority_fee):.6f} gwei")
-        print(f"Effective Price:{_wei_to_gwei(eff_price):.6f} gwei")
-        print(f"Transaction Fee:{fee_eth:.18f} ETH")
+
+        if is_legacy:
+            print("Base Fee:       N/A (pre-EIP-1559)")
+            print("Priority Fee:   N/A (pre-EIP-1559)")
+            print(f"Gas Price:      {_wei_to_gwei(eff_price):.9f} gwei")
+        else:
+            base_fee = block["baseFeePerGas"]
+            priority_fee = eff_price - base_fee
+            print(f"Base Fee:       {_wei_to_gwei(base_fee):.9f} gwei")
+            print(f"Priority Fee:   {_wei_to_gwei(priority_fee):.9f} gwei")
+            print(f"Effective Price:{_wei_to_gwei(eff_price):.9f} gwei")
+
+        print(f"Transaction Fee:{fee_eth:.18f} ETH ({fee_usd:.6f} USD at current price)")
 
     # ── Function decoding ─────────────────────────────────────────────────────
     calldata = _normalize_calldata(tx.get("input", "0x"))
