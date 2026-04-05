@@ -1,26 +1,26 @@
 .PHONY: run test lint format lint-fix install pre-commit-install clean
 
 run:
-	python src/main.py
+	python3 src/main.py
 
 test:
 	pytest tests/ -v
 
 lint:
-	ruff check src/ tests/ core/ chain/
+	ruff check src/ tests/
 
 lint-fix:
-	ruff check src/ tests/ core/ chain/ --fix
+	ruff check src/ tests/ --fix
 
 format:
-	ruff format src/ tests/ core/ chain/
+	ruff format src/ tests/
 
 install:
-	pip install -r requirements.txt
+	pip3 install -r requirements.txt
 
 pre-commit-install:
 	pre-commit install
 
 clean:
-	powershell -Command "Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force"
-	powershell -Command "Get-ChildItem -Recurse -Directory -Filter .pytest_cache | Remove-Item -Recurse -Force"
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type d -name .pytest_cache -exec rm -rf {} +

@@ -67,7 +67,7 @@ CHAIN_ID=11155111
 
 ## Project Structure
 ```
-trade/
+src/
   core/                   # Week 1 — wallet, types, serialization
     wallet.py             # WalletManager
     serializer.py         # CanonicalSerializer
@@ -83,15 +83,15 @@ trade/
   strategy/               # Week 4 — coming soon
   executor/               # Week 4 — coming soon
   safety/                 # Week 5 — coming soon
-  config/                 # Week 5 — coming soon
-  scripts/
-    integration_test.py   # Week 1 — End-to-end Sepolia test
-  tests/                  # 110 unit tests
-  .env                    # Secret config — never commit!
-  .env.example            # Safe template
-  .pre-commit-config.yaml # ruff + detect-secrets hooks
-  Makefile
-  requirements.txt
+  configs/                # Week 5 — coming soon
+scripts/
+  integration_test.py     # Week 1 — End-to-end Sepolia test
+tests/                    # 153 unit tests
+.env                      # Secret config — never commit!
+.env.example              # Safe template
+.pre-commit-config.yaml   # ruff + detect-secrets hooks
+Makefile
+requirements.txt
 ```
 
 ---
@@ -114,10 +114,10 @@ trade/
 ### Transaction Analyzer CLI
 ```bash
 # Analyze any Sepolia transaction
-python -m chain.analyzer 0xTxHash...
+python -m src.chain.analyzer 0xTxHash...
 
 # Analyze any Mainnet transaction
-python -m chain.analyzer 0xTxHash... --rpc https://eth-mainnet.g.alchemy.com/v2/your_key
+python -m src.chain.analyzer 0xTxHash... --rpc https://eth-mainnet.g.alchemy.com/v2/your_key
 ```
 
 Example output:
@@ -184,7 +184,6 @@ Integration Test — Sepolia Testnet
 ----------------------------------------
   Balance: 0.047000 ETH
   ✓ Balance > 0
-  ✓ Sufficient balance for test (> 0.002 ETH)
 
 4. Building transaction
 ----------------------------------------
@@ -193,9 +192,13 @@ Integration Test — Sepolia Testnet
   Estimated Gas: 25200
   Max Fee:       26005723 wei
   Max Priority:  1500000 wei
+  Gas cost:      0.00000055 ETH
+  Total needed:  0.00000155 ETH
+  Balance:       0.04700000 ETH
   ✓ Gas limit set
   ✓ Max fee set
   ✓ Recipient is correct
+  ✓ Sufficient balance (need 0.00000155 ETH)
 
 5. Signing transaction
 ----------------------------------------
@@ -259,7 +262,7 @@ Integration test PASSED ✓
 | Command | What it does |
 |---------|--------------|
 | `make install` | Install all dependencies |
-| `make test` | Run all 110 tests |
+| `make test` | Run all 153 tests |
 | `make lint` | Lint with ruff |
 | `make lint-fix` | Auto-fix lint errors |
 | `make format` | Auto-format with ruff |
@@ -297,4 +300,4 @@ Integration test PASSED ✓
 - `core/` module: WalletManager, CanonicalSerializer, Address, TokenAmount, Token
 - `chain/` module: ChainClient, TransactionBuilder, Transaction Analyzer CLI
 - Integration test passing on Sepolia
-- 110 unit tests passing
+- 153 unit tests passing

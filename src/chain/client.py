@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
-import web3
 from src.core.types import TransactionReceipt, TransactionRequest, Address, TokenAmount
-from src.chain.errors import RPCError
+from src.chain.errors import RPCError, InsufficientFunds, NonceTooLow, ReplacementUnderpriced
 from web3 import Web3
 from decimal import Decimal
 import time
@@ -39,23 +38,67 @@ class ChainClient:
     - Proper error classification
     """
 
+    # Errors that should not be retried — they won't resolve on their own
+    _FATAL_ERRORS = (
+        "insufficient funds",
+        "nonce too low",
+        "replacement transaction underpriced",
+        "invalid signature",
+        "execution reverted",
+    )
+
     def __init__(self, rpc_urls: list[str], timeout: int = 30, max_retries: int = 3):
         self._rpc_urls = rpc_urls
         self._timeout = timeout
         self._max_retries = max_retries
+        self._current_rpc_index = 0
         self._web3 = Web3(
             Web3.HTTPProvider(rpc_urls[0], request_kwargs={"timeout": timeout})
         )
 
+    def _switch_rpc(self) -> bool:
+        """Switch to next available RPC endpoint. Returns True if switched."""
+        if len(self._rpc_urls) <= 1:
+            return False
+        next_index = (self._current_rpc_index + 1) % len(self._rpc_urls)
+        self._current_rpc_index = next_index
+        self._web3 = Web3(
+            Web3.HTTPProvider(
+                self._rpc_urls[self._current_rpc_index],
+                request_kwargs={"timeout": self._timeout},
+            )
+        )
+        return True
+
+    def _classify_error(self, e: Exception) -> Exception:
+        """Map raw RPC errors to specific exception types."""
+        msg = str(e).lower()
+        if "insufficient funds" in msg:
+            return InsufficientFunds(str(e))
+        if "nonce too low" in msg:
+            return NonceTooLow(str(e))
+        if "replacement transaction underpriced" in msg:
+            return ReplacementUnderpriced(str(e))
+        return RPCError(str(e))
+
+    def _is_fatal(self, e: Exception) -> bool:
+        msg = str(e).lower()
+        return any(pattern in msg for pattern in self._FATAL_ERRORS)
+
     def _retry(self, func, *args, **kwargs):
-        """Retry with exponential backoff."""
+        """Retry with exponential backoff and RPC fallback. Fatal errors are not retried."""
+        last_error: Exception = RPCError("Unknown error")
         for attempt in range(self._max_retries):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                if attempt == self._max_retries - 1:
-                    raise RPCError(str(e)) from e
-                time.sleep(2**attempt)
+                if self._is_fatal(e):
+                    raise self._classify_error(e) from e
+                last_error = e
+                if attempt < self._max_retries - 1:
+                    self._switch_rpc()
+                    time.sleep(2**attempt)
+        raise self._classify_error(last_error) from last_error
 
     def get_balance(self, address: Address) -> TokenAmount:
         """Get ETH balance of an address."""
@@ -91,15 +134,19 @@ class ChainClient:
     def wait_for_receipt(
         self, tx_hash: str, timeout: int = 120, poll_interval: float = 1.0
     ) -> TransactionReceipt:
-        """Wait for transaction confirmation."""
+        """Wait for transaction confirmation. Retries on transient RPC errors."""
+        from web3.exceptions import TransactionNotFound
+
         start_time = time.time()
         while True:
             try:
                 receipt = self._web3.eth.get_transaction_receipt(tx_hash)
                 if receipt is not None:
                     return TransactionReceipt.from_web3(receipt)
-            except web3.exceptions.TransactionNotFound:
+            except TransactionNotFound:
                 pass
+            except Exception:
+                self._switch_rpc()
             if time.time() - start_time > timeout:
                 raise TimeoutError(
                     f"Transaction {tx_hash} not confirmed within {timeout} seconds"

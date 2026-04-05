@@ -165,12 +165,18 @@ def _extract_revert_reason(e: Exception) -> str:
         return clean.strip("'").strip('"')
     return msg
 
-def get_eth_price_usd() -> float:
-    response = requests.get(
-        "https://api.coingecko.com/api/v3/simple/price",
-        params={"ids": "ethereum", "vs_currencies": "usd"}
-    )
-    return response.json()["ethereum"]["usd"]
+def get_eth_price_usd() -> Optional[float]:
+    """Returns ETH price in USD, or None if the API is unavailable."""
+    try:
+        response = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": "ethereum", "vs_currencies": "usd"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json()["ethereum"]["usd"]
+    except Exception:
+        return None
 
 # ── Token metadata cache ──────────────────────────────────────────────────────
 
@@ -259,8 +265,8 @@ def analyze(tx_hash: str, rpc_url: str) -> None:
         gas_pct = (gas_used / gas_limit * 100) if gas_limit else 0
         eff_price = receipt.effective_gas_price
         fee_eth = _wei_to_eth(gas_used * eff_price)
-        eth_price_USD = get_eth_price_usd()
-        fee_usd = fee_eth * Decimal(eth_price_USD)
+        eth_price_usd = get_eth_price_usd()
+        fee_usd = fee_eth * Decimal(eth_price_usd) if eth_price_usd else None
 
         is_legacy = block.get("baseFeePerGas") is None
 
@@ -281,7 +287,8 @@ def analyze(tx_hash: str, rpc_url: str) -> None:
             print(f"Priority Fee:   {_wei_to_gwei(priority_fee):.9f} gwei")
             print(f"Effective Price:{_wei_to_gwei(eff_price):.9f} gwei")
 
-        print(f"Transaction Fee:{fee_eth:.18f} ETH ({fee_usd:.6f} USD at current price)")
+        fee_usd_str = f"{fee_usd:.6f} USD" if fee_usd is not None else "N/A (price unavailable)"
+        print(f"Transaction Fee:{fee_eth:.18f} ETH ({fee_usd_str})")
 
     # ── Function decoding ─────────────────────────────────────────────────────
     calldata = _normalize_calldata(tx.get("input", "0x"))

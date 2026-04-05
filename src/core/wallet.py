@@ -33,12 +33,13 @@ class WalletManager:
         return cls(private_key)
 
     @classmethod
-    def generate(cls) -> "WalletManager":
-        """Generate a new random wallet. Returns manager + displays private key ONCE."""
+    def generate(cls) -> tuple["WalletManager", str]:
+        """Generate a new random wallet. Returns (manager, private_key_hex).
+        Caller is responsible for securely storing the private key."""
         account = Account.create()
+        key_hex = "0x" + account.key.hex()
         print(f"Generated new wallet with address: {account.address}")
-        print(f"Private key (store this securely!): {account.key.hex()}")
-        return cls(account.key.hex())
+        return cls(key_hex), key_hex
 
     @property
     def address(self) -> str:
@@ -79,7 +80,7 @@ class WalletManager:
         if "to" not in tx:
             raise ValueError("Transaction must have 'to' field.")
         if "value" not in tx:
-            raise ValueError("Transaction must have 'to' field.")
+            raise ValueError("Transaction must have 'value' field.")
 
         return self._account.sign_transaction(tx)
 

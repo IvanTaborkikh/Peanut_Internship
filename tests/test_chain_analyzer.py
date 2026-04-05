@@ -1,6 +1,6 @@
 # tests/test_chain_analyzer.py
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from src.chain import (
     _decode_selector,
     _decode_arguments,
@@ -8,6 +8,7 @@ from src.chain import (
     _wei_to_gwei,
     _wei_to_eth,
     _extract_revert_reason,
+    get_eth_price_usd,
 )
 from web3 import Web3
 
@@ -124,7 +125,6 @@ def test_decode_arguments_transfer():
     recipient = "0xab5801a7d398351b8be11c439e05c5b3259aec9b"
     amount = 1000
 
-    # Encode transfer(address, uint256)
     contract = w3.eth.contract(
         abi=[
             {
@@ -172,3 +172,45 @@ def test_extract_revert_reason_no_keyword():
 def test_extract_revert_reason_empty():
     e = Exception("")
     assert _extract_revert_reason(e) == ""
+
+
+# ── get_eth_price_usd tests ───────────────────────────────────────────────────
+def test_get_eth_price_usd_returns_float_on_success():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"ethereum": {"usd": 3500.0}}
+    mock_response.raise_for_status.return_value = None
+
+    with patch("requests.get", return_value=mock_response):
+        price = get_eth_price_usd()
+
+    assert price == 3500.0
+    assert isinstance(price, float)
+
+
+def test_get_eth_price_usd_returns_none_on_network_error():
+    with patch("requests.get", side_effect=Exception("connection refused")):
+        price = get_eth_price_usd()
+
+    assert price is None
+
+
+def test_get_eth_price_usd_returns_none_on_bad_json():
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"unexpected": "format"}
+    mock_response.raise_for_status.return_value = None
+
+    with patch("requests.get", return_value=mock_response):
+        price = get_eth_price_usd()
+
+    assert price is None
+
+
+def test_get_eth_price_usd_returns_none_on_http_error():
+    import requests
+    mock_response = MagicMock()
+    mock_response.raise_for_status.side_effect = requests.HTTPError("503")
+
+    with patch("requests.get", return_value=mock_response):
+        price = get_eth_price_usd()
+
+    assert price is None

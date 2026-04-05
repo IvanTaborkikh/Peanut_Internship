@@ -36,10 +36,35 @@ def test_from_env_loads_correctly():
         assert wallet.address is not None
 
 
-def test_generate_returns_wallet():
-    wallet = WalletManager.generate()
+def test_from_env_key_without_0x_raises():
+    key_without_prefix = TEST_PRIVATE_KEY.lstrip("0x")
+    with patch.dict("os.environ", {"PRIVATE_KEY": key_without_prefix}):
+        with pytest.raises(ValueError, match="0x"):
+            WalletManager.from_env("PRIVATE_KEY")
+
+
+def test_generate_returns_wallet_and_key():
+    wallet, key = WalletManager.generate()
     assert isinstance(wallet, WalletManager)
     assert wallet.address.startswith("0x")
+
+
+def test_generate_returns_valid_private_key():
+    _, key = WalletManager.generate()
+    assert key.startswith("0x")
+    assert len(key) == 66  # 0x + 64 hex chars
+
+
+def test_generate_key_matches_wallet_address():
+    wallet, key = WalletManager.generate()
+    expected_address = Account.from_key(key).address
+    assert wallet.address == expected_address
+
+
+def test_generate_does_not_print_private_key(capsys):
+    _, key = WalletManager.generate()
+    captured = capsys.readouterr()
+    assert key not in captured.out
 
 
 def test_sign_message_empty_raises():
@@ -64,16 +89,46 @@ def test_sign_message_verifiable():
     assert recovered == wallet.address
 
 
+def test_sign_message_invalid_type_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(TypeError):
+        wallet.sign_message(123)
+
+
 def test_sign_transaction_empty_raises():
     wallet = WalletManager(TEST_PRIVATE_KEY)
     with pytest.raises(ValueError):
         wallet.sign_transaction({})
 
 
+def test_sign_transaction_missing_to_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(ValueError, match="'to' field"):
+        wallet.sign_transaction({"value": 0, "chainId": 1})
+
+
+def test_sign_transaction_missing_value_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(ValueError, match="'value' field"):
+        wallet.sign_transaction({"to": "0xab5801a7d398351b8be11c439e05c5b3259aec9b"})
+
+
+def test_sign_transaction_invalid_type_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(TypeError):
+        wallet.sign_transaction("not a dict")
+
+
 def test_sign_typed_data_empty_domain_raises():
     wallet = WalletManager(TEST_PRIVATE_KEY)
     with pytest.raises(ValueError):
         wallet.sign_typed_data({}, {"Test": []}, {"value": 1})
+
+
+def test_sign_typed_data_invalid_type_raises():
+    wallet = WalletManager(TEST_PRIVATE_KEY)
+    with pytest.raises(TypeError):
+        wallet.sign_typed_data("not a dict", {}, {})
 
 
 def test_address_is_checksummed():
@@ -86,21 +141,3 @@ def test_exception_does_not_expose_private_key():
         WalletManager("invalid_key")
     except Exception as e:
         assert TEST_PRIVATE_KEY not in str(e)
-
-
-def test_sign_message_invalid_type_raises():
-    wallet = WalletManager(TEST_PRIVATE_KEY)
-    with pytest.raises(TypeError):
-        wallet.sign_message(123)
-
-
-def test_sign_transaction_invalid_type_raises():
-    wallet = WalletManager(TEST_PRIVATE_KEY)
-    with pytest.raises(TypeError):
-        wallet.sign_transaction("not a dict")
-
-
-def test_sign_typed_data_invalid_type_raises():
-    wallet = WalletManager(TEST_PRIVATE_KEY)
-    with pytest.raises(TypeError):
-        wallet.sign_typed_data("not a dict", {}, {})
