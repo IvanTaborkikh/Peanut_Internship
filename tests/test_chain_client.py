@@ -1,5 +1,4 @@
 import pytest
-import time
 from unittest.mock import patch, MagicMock
 from src.chain import ChainClient, GasPrice
 from src.chain.errors import RPCError, InsufficientFunds, NonceTooLow, ReplacementUnderpriced
