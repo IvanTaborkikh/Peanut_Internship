@@ -281,7 +281,7 @@ Integration test PASSED ✓
 
 **Financial precision**
 - All amounts use `Decimal` — never `float`
-- `float`: `1.5 * 10**18 = 1499999999999999872` ❌
+- `float`: `1.5 * 10**18 = 1499999999999999873` ❌
 - `Decimal`: `Decimal("1.5") * 10**18 = 1500000000000000000` ✅
 
 **Rules — never break these**
