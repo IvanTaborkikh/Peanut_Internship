@@ -3,9 +3,14 @@
 Integration test for the arbitrage trading system.
 Tests the full flow: wallet → transaction → Sepolia testnet.
 
-Usage: python scripts/integration_test.py
+Usage:
+  python scripts/integration_test.py
+  python scripts/integration_test.py --amount 0.00005
+  python scripts/integration_test.py --to 0xYourAddress
+  python scripts/integration_test.py --amount 0.00005 --to 0xYourAddress
 """
 
+import argparse
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,9 +25,15 @@ from src.core.wallet import WalletManager
 
 load_dotenv()
 
+# ── Args ──────────────────────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="Integration test on Sepolia testnet.")
+parser.add_argument("--amount", default="0.000001", help="ETH amount to send (default: 0.000001)")
+parser.add_argument("--to", default="0x000000000000000000000000000000000000dEaD", help="Recipient address")
+args = parser.parse_args()
+
 # ── Config ────────────────────────────────────────────────────────────────────
-RECIPIENT    = "0x000000000000000000000000000000000000dEaD"  # test recipient
-SEND_AMOUNT  = TokenAmount.from_human("0.000001", 18, "ETH")
+RECIPIENT    = args.to
+SEND_AMOUNT  = TokenAmount.from_human(args.amount, 18, "ETH")
 RPC_URL      = os.getenv("RPC_URL")
 CHAIN_ID     = int(os.getenv("CHAIN_ID", "11155111"))
 

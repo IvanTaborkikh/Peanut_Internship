@@ -97,11 +97,15 @@ class TransactionBuilder:
         wallet_address = Address(self._wallet.address)
         balance = self._client.get_balance(wallet_address)
         gas_cost = self._gas_limit * self._max_fee_per_gas
+        gas_amount = TokenAmount(raw=gas_cost, decimals=18, symbol="ETH")
         total_required = self._value.raw + gas_cost
+        total_amount = TokenAmount(raw=total_required, decimals=18, symbol="ETH")
         if balance.raw < total_required:
             raise InsufficientFunds(
-                f"Balance {balance.raw} wei < required {total_required} wei "
-                f"(value={self._value.raw}, gas={gas_cost})"
+                f"Balance {balance.raw} wei ({balance.human:.8f} ETH) < "
+                f"required {total_required} wei ({total_amount.human:.8f} ETH) "
+                f"(value={self._value.raw} wei ({self._value.human:.8f} ETH), "
+                f"gas={gas_cost} wei ({gas_amount.human:.8f} ETH))"
             )
 
         return TransactionRequest(

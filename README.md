@@ -5,6 +5,16 @@ Designed for MEV, HFT, and on-chain arbitrage strategies.
 
 ---
 
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [docs/setup.md](docs/setup.md) | Installation, environment setup, make commands |
+| [docs/core.md](docs/core.md) | `Address`, `TokenAmount`, `WalletManager`, `CanonicalSerializer` |
+| [docs/chain.md](docs/chain.md) | `ChainClient`, `TransactionBuilder`, `Analyzer`, error handling |
+
+---
+
 ## What it can do now
 
 - Load Ethereum wallet from environment, sign messages and transactions
@@ -259,15 +269,35 @@ Integration test PASSED ✓
 
 ## Make Commands
 
+Run `make help` to see all available commands.
+
+**Setup**
+
 | Command | What it does |
 |---------|--------------|
 | `make install` | Install all dependencies |
-| `make test` | Run all 153 tests |
-| `make lint` | Lint with ruff |
+| `make pre-commit-install` | Wire up git hooks (ruff + detect-secrets) |
+
+**Development**
+
+| Command | What it does |
+|---------|--------------|
+| `make test` | Run all 153 unit tests |
+| `make lint` | Check code with ruff |
 | `make lint-fix` | Auto-fix lint errors |
-| `make format` | Auto-format with ruff |
-| `make pre-commit-install` | Wire up git hooks |
+| `make format` | Auto-format code |
 | `make clean` | Remove cache files |
+
+**Blockchain**
+
+| Command | What it does |
+|---------|--------------|
+| `make analyze TX=0x...` | Analyze a transaction (uses `RPC_URL` from `.env`) |
+| `make analyze TX=0x... RPC=https://...` | Analyze with a specific RPC endpoint |
+| `make integration-test` | Run integration test on Sepolia (default: 0.000001 ETH → 0x...dEaD) |
+| `make integration-test AMOUNT=0.00005` | Send custom amount |
+| `make integration-test TO=0xAddress` | Send to custom address |
+| `make integration-test AMOUNT=0.00005 TO=0x...` | Custom amount and recipient |
 
 ---
 
