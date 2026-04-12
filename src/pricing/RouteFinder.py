@@ -1,6 +1,24 @@
-from src.core.types import Token
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import TYPE_CHECKING, Optional, TypedDict
+
+from src.core.types import Address, Token
 from src.pricing.Route import Route
 from src.pricing.UniswapV2Pair import UniswapV2Pair
+
+if TYPE_CHECKING:
+    from src.pricing.ForkSimulator import ForkSimulator
+
+ZERO_ADDRESS = Address("0x0000000000000000000000000000000000000000")
+
+
+class RouteComparison(TypedDict):
+    route: Route
+    gross_output: int
+    gas_estimate: int
+    gas_cost: int
+    net_output: int
 
 
 class RouteFinder:
@@ -8,22 +26,40 @@ class RouteFinder:
     Finds optimal routes between tokens across multiple pools.
     """
 
-    def __init__(self, pools: list[UniswapV2Pair]):
+    def __init__(
+        self,
+        pools: list[UniswapV2Pair],
+        simulator: Optional[ForkSimulator] = None,
+        sender: Optional[Address] = None,
+    ):
         self.pools = pools
         self.graph = self._build_graph()
+        self.simulator = simulator
+        self.sender = sender or ZERO_ADDRESS
 
-    def _build_graph(self) -> dict:
+    def _build_graph(self) -> dict[Address, list[tuple[UniswapV2Pair, Token]]]:
         """
         Build adjacency graph:
         token_address → [(pool, other_token), ...]
         """
-        graph: dict = {}
+        graph: dict[Address, list[tuple[UniswapV2Pair, Token]]] = {}
         for pool in self.pools:
             t0 = pool.token0
             t1 = pool.token1
             graph.setdefault(t0.address, []).append((pool, t1))
             graph.setdefault(t1.address, []).append((pool, t0))
         return graph
+
+    def update_pool(self, updated_pool: UniswapV2Pair) -> None:
+        """
+        Replace a single pool in-place and rebuild the graph.
+        More efficient than creating a new RouteFinder on every refresh.
+        """
+        for i, pool in enumerate(self.pools):
+            if pool.address == updated_pool.address:
+                self.pools[i] = updated_pool
+                break
+        self.graph = self._build_graph()
 
     def find_all_routes(
         self,
@@ -40,7 +76,7 @@ class RouteFinder:
             current_token: Token,
             pools_used: list[UniswapV2Pair],
             path: list[Token],
-            visited_pools: set,
+            visited_pools: set[Address],
         ) -> None:
             if len(pools_used) > max_hops:
                 return
@@ -48,18 +84,67 @@ class RouteFinder:
                 routes.append(Route(list(pools_used), list(path)))
                 return
             for pool, next_token in self.graph.get(current_token.address, []):
-                if id(pool) in visited_pools:
+                if pool.address in visited_pools:
                     continue
-                visited_pools.add(id(pool))
+                visited_pools.add(pool.address)
                 pools_used.append(pool)
                 path.append(next_token)
                 dfs(next_token, pools_used, path, visited_pools)
                 path.pop()
                 pools_used.pop()
-                visited_pools.discard(id(pool))
+                visited_pools.discard(pool.address)
 
         dfs(token_in, [], [token_in], set())
         return routes
+
+    def _get_gas_estimate(self, route: Route) -> int:
+        """
+        Return real gas estimate from fork simulator if available,
+        otherwise fall back to static estimate from route.estimate_gas().
+        """
+        if self.simulator is not None:
+            result = self.simulator.simulate_route(route, 0, self.sender)
+            if result.success and result.gas_used > 0:
+                return result.gas_used
+        return route.estimate_gas()
+
+    def _gas_cost_in_output_token(
+        self,
+        route: Route,
+        gas_price_gwei: int,
+    ) -> int:
+        """
+        Convert gas cost to output token units.
+
+        Gas is always paid in ETH (wei). To compare with gross output
+        (which is in output token units), we convert using spot price
+        from a pool that connects token_in → token_out.
+
+        If no direct pool is found, returns gas cost in wei as-is
+        (best-effort fallback).
+        """
+        gas_cost_wei = self._get_gas_estimate(route) * gas_price_gwei * 10**9
+        token_in = route.path[0]
+        token_out = route.path[-1]
+
+        spot = self._find_spot(token_in, token_out)
+        if spot is None or spot == 0:
+            return gas_cost_wei
+
+        # spot = reserve_in / reserve_out (raw units)
+        # gas_cost_in_output = gas_cost_wei / spot
+        return int(Decimal(gas_cost_wei) / spot)
+
+    def _find_spot(self, token_in: Token, token_out: Token) -> Optional[Decimal]:
+        """
+        Find spot price (token_in units per token_out unit) from a direct pool.
+        Returns None if no direct pool exists.
+        """
+        for pool in self.pools:
+            addrs = {pool.token0.address, pool.token1.address}
+            if token_in.address in addrs and token_out.address in addrs:
+                return pool.get_spot_price(token_in)
+        return None
 
     def find_best_route(
         self,
@@ -72,23 +157,24 @@ class RouteFinder:
         """
         Find route that maximizes NET output (after gas).
         Returns (best_route, net_output).
+        Raises ValueError if no route exists.
         """
         routes = self.find_all_routes(token_in, token_out, max_hops)
         if not routes:
             raise ValueError(f"No route found from {token_in.symbol} to {token_out.symbol}")
 
-        best_route = None
-        best_net = None
+        best_route = routes[0]
+        best_net = routes[0].get_output(amount_in) - self._gas_cost_in_output_token(routes[0], gas_price_gwei)
 
-        for route in routes:
+        for route in routes[1:]:
             gross = route.get_output(amount_in)
-            gas_cost = route.estimate_gas() * gas_price_gwei
+            gas_cost = self._gas_cost_in_output_token(route, gas_price_gwei)
             net = gross - gas_cost
-            if best_net is None or net > best_net:
+            if net > best_net:
                 best_net = net
                 best_route = route
 
-        return best_route, best_net  # type: ignore[return-value]
+        return best_route, best_net
 
     def compare_routes(
         self,
@@ -96,29 +182,22 @@ class RouteFinder:
         token_out: Token,
         amount_in: int,
         gas_price_gwei: int,
-    ) -> list[dict]:
+    ) -> list[RouteComparison]:
         """
-        Compare all routes with detailed breakdown:
-        {
-            'route': Route,
-            'gross_output': int,
-            'gas_estimate': int,
-            'gas_cost': int,
-            'net_output': int,
-        }
+        Compare all routes with detailed breakdown, sorted by net_output descending.
         """
         routes = self.find_all_routes(token_in, token_out)
-        results = []
+        results: list[RouteComparison] = []
         for route in routes:
             gross = route.get_output(amount_in)
             gas_est = route.estimate_gas()
-            gas_cost = gas_est * gas_price_gwei
-            results.append({
-                "route": route,
-                "gross_output": gross,
-                "gas_estimate": gas_est,
-                "gas_cost": gas_cost,
-                "net_output": gross - gas_cost,
-            })
+            gas_cost = self._gas_cost_in_output_token(route, gas_price_gwei)
+            results.append(RouteComparison(
+                route=route,
+                gross_output=gross,
+                gas_estimate=gas_est,
+                gas_cost=gas_cost,
+                net_output=gross - gas_cost,
+            ))
         results.sort(key=lambda r: r["net_output"], reverse=True)
         return results

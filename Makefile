@@ -1,4 +1,4 @@
-.PHONY: run test lint format lint-fix install pre-commit-install clean analyze integration-test pricing-demo impact-analyzer test-mempool test-fork help
+.PHONY: run test lint format lint-fix install pre-commit-install clean analyze integration-test pricing-demo impact-analyzer test-mempool test-fork fork stop-fork help
 
 # ── OS detection ──────────────────────────────────────────────────────────────
 ifeq ($(OS),Windows_NT)
@@ -43,7 +43,9 @@ help:
 	@echo "    make impact-analyzer          Show price impact table (offline demo)"
 	@echo "    make impact-analyzer TOKEN_IN=USDC SIZES=1000,10000,100000  Custom sizes"
 	@echo "    make test-mempool             Watch live mempool for Uniswap swaps (needs WS_RPC_URL)"
-	@echo "    make test-fork                Test fork simulator (needs Anvil + start_fork.sh)"
+	@echo "    make test-fork                Test fork simulator (needs Anvil running)"
+	@echo "    make fork                     Start Anvil mainnet fork on port 8545"
+	@echo "    make stop-fork                Stop running Anvil process"
 	@echo ""
 
 run:
@@ -85,6 +87,12 @@ test-mempool:
 
 test-fork:
 	PYTHONPATH=. $(PYTHON) scripts/test_fork_simulator.py
+
+fork:
+	bash scripts/start_fork.sh
+
+stop-fork:
+	@pkill -f "anvil" && echo "Anvil stopped." || echo "Anvil was not running."
 
 clean:
 	$(RM_CACHE)
