@@ -3,7 +3,7 @@ from typing import Optional
 
 from web3 import Web3
 
-from src.core.types import Address
+from src.core.types import Address, Token
 from src.pricing.Route import Route
 from src.pricing.UniswapV2Pair import UniswapV2Pair
 
@@ -124,7 +124,7 @@ class ForkSimulator:
         self,
         pair: UniswapV2Pair,
         amount_in: int,
-        token_in,
+        token_in: Token,
     ) -> dict:
         """
         Compare our AMM integer math against actual fork simulation.
@@ -136,8 +136,6 @@ class ForkSimulator:
             'match': bool,
         }
         """
-        from src.pricing.Route import Route
-
         calculated = pair.get_amount_out(amount_in, token_in)
 
         if token_in.address == pair.token0.address:

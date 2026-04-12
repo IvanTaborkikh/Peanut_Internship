@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable, Optional
 
+from eth_abi import decode as abi_decode
+
 from src.core.types import Address
 
 
@@ -42,6 +44,13 @@ class MempoolMonitor:
         "0x7ff36ab5": ("UniswapV2", "swapExactETHForTokens"),
         "0x18cbafe5": ("UniswapV2", "swapExactTokensForETH"),
         "0x5ae401dc": ("UniswapV3", "multicall"),
+    }
+
+    # ABI types for each selector (excluding the 4-byte selector)
+    _ABI_TYPES: dict[str, list[str]] = {
+        "0x38ed1739": ["uint256", "uint256", "address[]", "address", "uint256"],
+        "0x18cbafe5": ["uint256", "uint256", "address[]", "address", "uint256"],
+        "0x7ff36ab5": ["uint256", "address[]", "address", "uint256"],
     }
 
     def __init__(self, ws_url: str, callback: Callable[[ParsedSwap], None]):
@@ -101,7 +110,7 @@ class MempoolMonitor:
                 except Exception:
                     continue
 
-    def parse_transaction(self, tx: dict) -> Optional["ParsedSwap"]:
+    def parse_transaction(self, tx: dict) -> Optional[ParsedSwap]:
         """
         Parse a raw transaction dict.
         Returns None if not a recognised swap.
@@ -146,46 +155,41 @@ class MempoolMonitor:
 
     def decode_swap_params(self, selector: str, data: bytes) -> dict:
         """
-        Decode swap parameters from calldata for a given selector.
-        Best-effort ABI decoding without external dependencies.
+        Decode swap parameters from calldata using eth_abi.
+        Supports: swapExactTokensForTokens, swapExactETHForTokens, swapExactTokensForETH.
+        Returns empty dict for unknown or malformed calldata.
         """
-        # Skip the 4-byte selector
-        payload = data[4:]
+        abi_types = self._ABI_TYPES.get(selector)
+        if abi_types is None:
+            return {}
 
-        def decode_uint256(offset: int) -> int:
-            return int.from_bytes(payload[offset: offset + 32], "big")
-
-        def decode_address(offset: int) -> str:
-            return "0x" + payload[offset + 12: offset + 32].hex()
+        try:
+            decoded = abi_decode(abi_types, data[4:])
+        except Exception:
+            return {}
 
         result: dict = {}
 
-        try:
-            if selector in ("0x38ed1739", "0x18cbafe5"):
-                # swapExactTokensForTokens / swapExactTokensForETH
-                # (uint amountIn, uint amountOutMin, address[] path, address to, uint deadline)
-                result["amount_in"] = decode_uint256(0)
-                result["min_amount_out"] = decode_uint256(32)
-                path_offset = decode_uint256(64)
-                path_len = decode_uint256(path_offset)
-                if path_len >= 2:
-                    result["token_in"] = decode_address(path_offset + 32)
-                    result["token_out"] = decode_address(path_offset + 32 + (path_len - 1) * 32)
-                result["deadline"] = decode_uint256(128)
+        if selector in ("0x38ed1739", "0x18cbafe5"):
+            # swapExactTokensForTokens / swapExactTokensForETH
+            # (uint amountIn, uint amountOutMin, address[] path, address to, uint deadline)
+            amount_in, amount_out_min, path, _to, deadline = decoded
+            result["amount_in"] = amount_in
+            result["min_amount_out"] = amount_out_min
+            result["deadline"] = deadline
+            if len(path) >= 2:
+                result["token_in"] = path[0]
+                result["token_out"] = path[-1]
 
-            elif selector == "0x7ff36ab5":
-                # swapExactETHForTokens
-                # (uint amountOutMin, address[] path, address to, uint deadline)
-                result["amount_in"] = 0  # ETH value from tx.value
-                result["min_amount_out"] = decode_uint256(0)
-                path_offset = decode_uint256(32)
-                path_len = decode_uint256(path_offset)
-                if path_len >= 2:
-                    result["token_in"] = decode_address(path_offset + 32)
-                    result["token_out"] = decode_address(path_offset + 32 + (path_len - 1) * 32)
-                result["deadline"] = decode_uint256(96)
-
-        except Exception:
-            pass
+        elif selector == "0x7ff36ab5":
+            # swapExactETHForTokens
+            # (uint amountOutMin, address[] path, address to, uint deadline)
+            amount_out_min, path, _to, deadline = decoded
+            result["amount_in"] = 0  # ETH value read from tx.value in parse_transaction
+            result["min_amount_out"] = amount_out_min
+            result["deadline"] = deadline
+            if len(path) >= 2:
+                result["token_in"] = path[0]
+                result["token_out"] = path[-1]
 
         return result

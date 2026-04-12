@@ -5,13 +5,28 @@ from src.pricing.UniswapV2Pair import UniswapV2Pair
 class Route:
     """Represents a swap route through one or more pools."""
 
-    def __init__(self, pools: list[UniswapV2Pair], path: list[Token]):
+    def __init__(
+        self,
+        pools: list[UniswapV2Pair],
+        path: list[Token],
+        base_gas: int = 150_000,
+        gas_per_hop: int = 100_000,
+    ):
         if len(pools) != len(path) - 1:
             raise ValueError(
                 f"pools length ({len(pools)}) must equal path length - 1 ({len(path) - 1})"
             )
-        self.pools = pools
-        self.path = path  # [token_in, intermediate..., token_out]
+        for i, pool in enumerate(pools):
+            expected = {path[i].address, path[i + 1].address}
+            actual = {pool.token0.address, pool.token1.address}
+            if expected != actual:
+                raise ValueError(
+                    f"Pool {i} tokens {actual} do not match path tokens {expected}"
+                )
+        self.pools = list(pools)
+        self.path = list(path)  # [token_in, intermediate..., token_out]
+        self.base_gas = base_gas
+        self.gas_per_hop = gas_per_hop
 
     @property
     def num_hops(self) -> int:
@@ -40,6 +55,8 @@ class Route:
 
     def estimate_gas(self) -> int:
         """
-        Estimate gas cost: ~150k base + ~100k per additional hop.
+        Estimate gas cost: base_gas + gas_per_hop * (num_hops - 1).
+        Defaults: 150k base + 100k per additional hop.
+        Override via constructor: Route(pools, path, base_gas=200_000, gas_per_hop=120_000)
         """
-        return 150_000 + (self.num_hops - 1) * 100_000
+        return self.base_gas + (self.num_hops - 1) * self.gas_per_hop

@@ -48,14 +48,18 @@ class UniswapV2Pair:
         Calculate required input for desired output.
         Inverse of get_amount_out.
         """
-        assert amount_out > 0, "amount_out must be positive"
+        if amount_out <= 0:
+            raise ValueError("amount_out must be positive")
 
         if token_out.address == self.token0.address:
             reserve_in, reserve_out = self.reserve1, self.reserve0
         else:
             reserve_in, reserve_out = self.reserve0, self.reserve1
 
-        assert amount_out < reserve_out, "amount_out exceeds reserve"
+        if amount_out >= reserve_out:
+            raise ValueError(
+                f"amount_out ({amount_out}) exceeds reserve ({reserve_out})"
+            )
 
         numerator = reserve_in * amount_out * 10000
         denominator = (reserve_out - amount_out) * (10000 - self.fee_bps)
@@ -63,9 +67,12 @@ class UniswapV2Pair:
 
     def get_spot_price(self, token_in: Token) -> Decimal:
         """
-        Returns spot price (for display only, not calculations).
+        Returns spot price as reserve_in / reserve_out (for display and gas conversion).
+        Raises ValueError if reserve_out is zero.
         """
         reserve_in, reserve_out = self._reserves_for(token_in)
+        if reserve_out == 0:
+            raise ValueError("reserve_out is zero — pool has no liquidity")
         return Decimal(reserve_in) / Decimal(reserve_out)
 
     def get_execution_price(self, amount_in: int, token_in: Token) -> Decimal:

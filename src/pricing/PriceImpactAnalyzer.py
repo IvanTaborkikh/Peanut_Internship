@@ -67,7 +67,7 @@ class PriceImpactAnalyzer:
                 break
             try:
                 impact = self.pair.get_price_impact(mid, token_in)
-            except (AssertionError, ZeroDivisionError):
+            except (ValueError, ZeroDivisionError):
                 hi = mid
                 continue
             if impact <= max_impact_pct:

@@ -1,3 +1,4 @@
+import logging
 import time
 from dataclasses import dataclass
 from decimal import Decimal
@@ -10,6 +11,8 @@ from src.pricing.MempoolMonitor import MempoolMonitor, ParsedSwap
 from src.pricing.Route import Route
 from src.pricing.RouteFinder import RouteFinder
 from src.pricing.UniswapV2Pair import UniswapV2Pair
+
+logger = logging.getLogger(__name__)
 
 
 class QuoteError(Exception):
@@ -59,23 +62,36 @@ class PricingEngine:
         self.pools: dict[Address, UniswapV2Pair] = {}
         self.router: Optional[RouteFinder] = None
 
+    async def start_monitoring(self) -> None:
+        """
+        Start listening to mempool events via WebSocket.
+        Runs indefinitely — call from an async task or event loop.
+
+        Example:
+            asyncio.create_task(engine.start_monitoring())
+        """
+        await self.monitor.start()
+
     def load_pools(self, pool_addresses: list[Address]) -> None:
         """
         Load pool data from chain for each address.
-        Rebuilds the RouteFinder after loading.
+        Builds the RouteFinder after loading.
         """
         for addr in pool_addresses:
             self.pools[addr] = UniswapV2Pair.from_chain(addr, self.client)
-        self.router = RouteFinder(list(self.pools.values()))
+        self.router = RouteFinder(list(self.pools.values()), simulator=self.simulator)
 
     def refresh_pool(self, address: Address) -> None:
         """
-        Re-fetch reserves for a single pool from chain and rebuild the router.
+        Re-fetch reserves for a single pool from chain.
+        Updates the pool in-place via RouteFinder.update_pool() — no full rebuild.
         """
         if address not in self.pools:
             raise KeyError(f"Pool {address} not loaded — call load_pools() first.")
-        self.pools[address] = UniswapV2Pair.from_chain(address, self.client)
-        self.router = RouteFinder(list(self.pools.values()))
+        updated = UniswapV2Pair.from_chain(address, self.client)
+        self.pools[address] = updated
+        if self.router is not None:
+            self.router.update_pool(updated)
 
     def get_quote(
         self,
@@ -128,5 +144,5 @@ class PricingEngine:
             if swap.token_in in token_addrs or swap.token_out in token_addrs:
                 try:
                     self.refresh_pool(addr)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Failed to refresh pool %s after mempool swap: %s", addr, e)

@@ -12,6 +12,7 @@ Designed for MEV, HFT, and on-chain arbitrage strategies.
 | [docs/setup.md](docs/setup.md) | Installation, environment setup, make commands |
 | [docs/core.md](docs/core.md) | `Address`, `TokenAmount`, `WalletManager`, `CanonicalSerializer` |
 | [docs/chain.md](docs/chain.md) | `ChainClient`, `TransactionBuilder`, `Analyzer`, error handling |
+| [docs/pricing.md](docs/pricing.md) | `UniswapV2Pair`, `RouteFinder`, `PriceImpactAnalyzer`, `ForkSimulator`, `PricingEngine` |
 
 ---
 
@@ -20,16 +21,20 @@ Designed for MEV, HFT, and on-chain arbitrage strategies.
 - Load Ethereum wallet from environment, sign messages and transactions
 - Connect to any EVM-compatible RPC endpoint with automatic retry
 - Build, sign, and send transactions to testnet or mainnet
-- Analyze any Ethereum transaction: block info, gas analysis,
-  token transfers, revert reasons; decodes common DeFi functions
-  (ERC-20, Uniswap V2/V3) — unknown functions show raw selector
+- Analyze any Ethereum transaction: block info, gas analysis, token transfers, revert reasons
+- Calculate Uniswap V2 swap output with Solidity-exact integer arithmetic
+- Find optimal multi-hop swap routes using DFS graph traversal
+- Analyze price impact across trade sizes and find max safe trade size
+- Monitor Ethereum mempool for pending Uniswap swaps via WebSocket
+- Simulate swaps on a local Anvil fork and verify against local math
 - Full end-to-end integration test on Sepolia testnet
 
 ---
 
 ## Quick Start
 
-**Requirements:** Python 3.12+
+**Requirements:** Python 3.12+, [Foundry](https://book.getfoundry.sh/getting-started/installation) (for fork simulation)
+
 ```bash
 # 1. Clone
 git clone https://github.com/IvanTaborkikh/trade
@@ -37,8 +42,8 @@ cd trade
 
 # 2. Create virtual environment
 python -m venv .venv
-.venv\Scripts\activate      # Windows
 source .venv/bin/activate   # macOS/Linux
+.venv\Scripts\activate      # Windows
 
 # 3. Install dependencies
 make install
@@ -60,11 +65,14 @@ Fill in `.env`:
 # Your Ethereum private key — NEVER commit this file!
 PRIVATE_KEY=0x...
 
-# Sepolia testnet RPC (get free key at alchemy.com)
+# Sepolia testnet RPC
 RPC_URL=https://eth-sepolia.g.alchemy.com/v2/your_key
 
-# Mainnet RPC (for transaction analyzer)
+# Mainnet HTTP RPC (for fork simulation and transaction analyzer)
 MAINNET_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/your_key
+
+# Mainnet WebSocket RPC (for mempool monitoring)
+WS_RPC_URL=wss://eth-mainnet.g.alchemy.com/v2/your_key
 
 # Chain ID: 11155111 = Sepolia, 1 = Mainnet
 CHAIN_ID=11155111
@@ -87,16 +95,27 @@ src/
     builder.py            # TransactionBuilder
     analyzer.py           # CLI transaction analyzer
     errors.py             # ChainError, RPCError, TransactionFailed, etc.
-  pricing/                # Week 2 — coming soon
+  pricing/                # Week 2 — AMM math, routing, simulation
+    UniswapV2Pair.py      # AMM math (Solidity-exact integer arithmetic)
+    Route.py              # Single swap route with gas estimation
+    RouteFinder.py        # DFS multi-hop route discovery
+    PriceImpactAnalyzer.py# Impact table, max trade size, true cost
+    MempoolMonitor.py     # WebSocket pending tx parser (eth_abi)
+    ForkSimulator.py      # Swap simulation via Anvil fork
+    PricingEngine.py      # Unified pricing interface + Quote validation
+    impact_analyzer.py    # CLI for price impact analysis
   exchange/               # Week 3 — coming soon
   inventory/              # Week 3 — coming soon
   strategy/               # Week 4 — coming soon
   executor/               # Week 4 — coming soon
   safety/                 # Week 5 — coming soon
-  configs/                # Week 5 — coming soon
 scripts/
   integration_test.py     # Week 1 — End-to-end Sepolia test
-tests/                    # 153 unit tests
+  pricing_demo.py         # Week 2 — Pricing module demo (no network needed)
+  test_fork_simulator.py  # Week 2 — Fork simulation verification
+  test_mempool.py         # Week 2 — Live mempool monitoring
+  start_fork.sh           # Start Anvil mainnet fork
+tests/                    # 234 unit tests
 .env                      # Secret config — never commit!
 .env.example              # Safe template
 .pre-commit-config.yaml   # ruff + detect-secrets hooks
@@ -123,14 +142,9 @@ requirements.txt
 
 ### Transaction Analyzer CLI
 ```bash
-# Analyze any Sepolia transaction
-python -m src.chain.analyzer 0xTxHash...
-
-# Analyze any Mainnet transaction
-python -m src.chain.analyzer 0xTxHash... --rpc https://eth-mainnet.g.alchemy.com/v2/your_key
+make analyze TX=0xTxHash...
+make analyze TX=0xTxHash... RPC=https://eth-mainnet.g.alchemy.com/v2/your_key
 ```
-
-Example output:
 ```
 Transaction Analysis
 ==================================================
@@ -172,24 +186,24 @@ Execution Price:3766.9 DAI/WETH
 
 ### Integration Test
 ```bash
-python scripts/integration_test.py
+make integration-test
+make integration-test AMOUNT=0.00005 TO=0xAddress
 ```
-
-Output:
 ```
 ==================================================
-Integration Test — Sepolia Testnet                                                                                                                                        
-==================================================                                                                                                                        
-                                                                                                                                                                          
-1. Loading wallet                                                                                                                                                         
-----------------------------------------                                                                                                                                  
-  Wallet: 0xB865196D16922b08c53e966019067d98e9D4A465                                                                                                                      
-  ✓ Private key not exposed in repr                                                                                                                                       
-                                                                                                                                                                          
-2. Connecting to Sepolia                                                                                                                                                  
-----------------------------------------                                                                                                                                  
-  RPC: https://eth-sepolia.g.alchemy.com/v2/...                                                                                                                           
-                                                                                                                                                                          
+Integration Test — Sepolia Testnet
+==================================================
+
+1. Loading wallet
+----------------------------------------
+  Wallet: 0xB865196D16922b08c53e966019067d98e9D4A465
+  ✓ Private key not exposed in repr
+
+2. Connecting to Sepolia
+----------------------------------------
+  RPC: https://eth-sepolia.g.alchemy.com/v2/***
+  Chain ID: 11155111
+
 3. Checking balance
 ----------------------------------------
   Balance: 0.047000 ETH
@@ -200,69 +214,197 @@ Integration Test — Sepolia Testnet
   To:            0x000000000000000000000000000000000000dEaD
   Value:         0.000001 ETH
   Estimated Gas: 25200
-  Max Fee:       26005723 wei
-  Max Priority:  1500000 wei
   Gas cost:      0.00000055 ETH
   Total needed:  0.00000155 ETH
-  Balance:       0.04700000 ETH
   ✓ Gas limit set
-  ✓ Max fee set
-  ✓ Recipient is correct
   ✓ Sufficient balance (need 0.00000155 ETH)
 
 5. Signing transaction
 ----------------------------------------
   Signature: v=1, r=0x871fac4a...
-  Recovered address: 0xB865196D16922b08c53e966019067d98e9D4A465
   ✓ Signature valid
   ✓ Recovered address matches
 
 6. Sending transaction
 ----------------------------------------
-  TX Hash: 0xd6f6bff5ade9afe41054ac6e4b060f290f4a584bb06c5661a15df6f39910cd7f
+  TX Hash: 0xd6f6bff5...
   ✓ TX hash received
 
 7. Waiting for confirmation
 ----------------------------------------
-  Waiting... (up to 120 seconds)
   Block:    10580879
   Status:   SUCCESS
   Gas Used: 21000
   Fee:      0.0000004603 ETH
   ✓ Transaction confirmed
-  ✓ Gas used > 0
-
-8. Analyzing transaction
-----------------------------------------
-
-Transaction Analysis
-==================================================
-Hash:           0xd6f6bff5ade9afe41054ac6e4b060f290f4a584bb06c5661a15df6f39910cd7f
-Block:          10,580,879
-Timestamp:      2026-04-03 10:17:36 UTC
-Status:         SUCCESS
-
-From:           0xB865196D16922b08c53e966019067d98e9D4A465
-To:             0x000000000000000000000000000000000000dEaD
-Value:          0.000001 ETH
-
-Gas Analysis
-----------------------------------------
-Gas Limit:      25,200
-Gas Used:       21,000 (83.33%)
-Base Fee:       0.026006 gwei
-Priority Fee:   0.001500 gwei
-Effective Price:0.021918 gwei
-Transaction Fee:0.000000460282641000 ETH
-
-Function Called
-----------------------------------------
-Selector:       0x
-Function:       ETH Transfer (no calldata)
 
 ==================================================
 Integration test PASSED ✓
 ==================================================
+```
+
+---
+
+## Week 2 — Pricing Module
+
+### What was added
+
+| Module | Description |
+|--------|-------------|
+| `pricing/UniswapV2Pair.py` | AMM math with Solidity-exact integer arithmetic, verified against real on-chain tx |
+| `pricing/Route.py` | Swap route: ordered list of pools and tokens, configurable gas params |
+| `pricing/RouteFinder.py` | Graph-based DFS route discovery, selects best route by net output after gas |
+| `pricing/PriceImpactAnalyzer.py` | Impact table, binary search for max trade size, true cost with gas |
+| `pricing/MempoolMonitor.py` | WebSocket subscription to pending txs, ABI decoding via `eth_abi` |
+| `pricing/ForkSimulator.py` | Local Anvil fork simulation using `getAmountsOut` view call |
+| `pricing/PricingEngine.py` | Unified interface: loads pools, gets quotes, reacts to mempool events |
+
+### Pricing Demo (no network needed)
+```bash
+make pricing-demo
+```
+```
+────────────────────────────────────────────────────────────
+  1. AMM Math — UniswapV2Pair
+────────────────────────────────────────────────────────────
+Input:            1 WETH
+Output:           1992.01 USDC
+Spot price:       500000000.000000 WETH/USDC
+Execution price:  502004513.560734 WETH/USDC
+Price impact:     0.4009%
+
+--- simulate_swap (reserves after trade) ---
+Old reserves:  1000.0 WETH / 2,000,000 USDC
+New reserves:  1001.00 WETH / 1,998,008 USDC
+
+--- get_amount_in (reverse calc) ---
+To get 2000 USDC need: 1.004013 WETH
+
+────────────────────────────────────────────────────────────
+  2. Price Impact Analysis
+────────────────────────────────────────────────────────────
+ Amount In (ETH)   Output (USDC)    Impact
+--------------------------------------------
+             0.1          199.38   0.3109%
+             1.0        1,992.01   0.4009%
+             5.0        9,920.55   0.8009%
+            10.0       19,743.16   1.3009%
+            50.0       94,965.95   5.3009%
+           100.0      181,322.18  10.3009%
+
+Max trade for <1% impact: 6.9910 WETH
+
+True cost breakdown (1 ETH, 20 gwei):
+  Gross output:   1992.01 USDC
+  Gas cost (ETH): 0.003000 ETH
+  Net output:     1986.01 USDC
+
+────────────────────────────────────────────────────────────
+  3. Route Finding — WETH → USDC
+────────────────────────────────────────────────────────────
+Found 2 route(s):
+  [1] WETH → USDC           →  1992.0140 USDC  (gas est: 150,000)
+  [2] WETH → DAI → USDC     →  1983.2748 USDC  (gas est: 250,000)
+
+Route                          Gross     Gas est           Net
+--------------------------------------------------------------
+WETH → USDC                1992.0140     150,000     1986.0140
+WETH → DAI → USDC          1983.2748     250,000     1973.2748
+
+Best route: WETH → USDC  (net: 1986.0140 USDC)
+
+────────────────────────────────────────────────────────────
+  4. Mempool — Parse Swap Transaction
+────────────────────────────────────────────────────────────
+DEX:              UniswapV2
+Method:           swapExactTokensForTokens
+Token in:         0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+Token out:        0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+Amount in:        1000.00 USDC
+Min amount out:   950.00 USDC
+Slippage:         5.0%
+Gas price:        20 gwei
+```
+
+### Price Impact CLI
+```bash
+make impact-analyzer
+make impact-analyzer TOKEN_IN=WETH SIZES=1,5,10,50
+```
+```
+Price Impact Analysis: WETH → USDC
+Pair:        0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc
+Reserves:    1,000.00 WETH / 2,000,000.00 USDC
+Spot price:  2,000.0000 USDC/WETH
+
+┌────────────────┬────────────────┬────────────────┬───────────┐
+│        WETH In │       USDC Out │      USDC/WETH │    Impact │
+├────────────────┼────────────────┼────────────────┼───────────┤
+│         0.1000 │       199.3801 │       1,993.80 │     0.31% │
+│         1.0000 │       1,992.01 │       1,992.01 │     0.40% │
+│         5.0000 │       9,920.55 │       1,984.11 │     0.80% │
+│        10.0000 │      19,743.16 │       1,974.32 │     1.30% │
+│        50.0000 │      94,965.95 │       1,899.32 │     5.30% │
+│       100.0000 │     181,322.18 │       1,813.22 │    10.30% │
+└────────────────┴────────────────┴────────────────┴───────────┘
+
+Max trade for 1% impact: 6.9910 WETH
+```
+
+### Fork Simulation
+```bash
+# Terminal 1 — start Anvil fork
+make fork
+
+# Terminal 2 — verify our math against real contracts
+make test-fork
+```
+```
+Fork Simulator Test
+========================================
+
+1. Connecting to fork...
+   Connected to http://localhost:8545
+
+2. Loading WETH/USDC pair from fork...
+   Pair: 0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc
+   token0: USDC  reserve0: 131,447,219.188192
+   token1: WETH  reserve1: 74491.511240
+
+3. Fork simulation: 1.0000 WETH → 1753.3258 USDC
+
+4. Compare
+   Calculated:  1753325821
+   Simulated:   1753325821
+   Difference:  0
+   Match:       YES ✓
+```
+
+### Live Mempool Monitoring
+```bash
+make test-mempool   # requires WS_RPC_URL in .env
+```
+```
+Connecting to wss://eth-mainnet.g.alchemy.com/v2/...
+Watching mempool for Uniswap V2/V3 swaps. Press Ctrl+C to stop.
+
+[#1] UniswapV2 — swapExactETHForTokens
+  tx:        0x47037c377c70c30ce8...
+  sender:    0x225E8e1679...
+  token_in:  0xC02aaA39...
+  token_out: 0xe7cF04f4...
+  amount_in: 450000000000000000
+  slippage:  2.1%
+  gas price: 18 gwei
+
+[#2] UniswapV2 — swapExactTokensForTokens
+  tx:        0x2fb7933c4f03d02697...
+  sender:    0xAbbA7BeF6d...
+  token_in:  0xA0b86991...
+  token_out: 0xC02aaA39...
+  amount_in: 5000000000
+  slippage:  0.5%
+  gas price: 20 gwei
 ```
 
 ---
@@ -273,16 +415,16 @@ Run `make help` to see all available commands.
 
 **Setup**
 
-| Command | What it does |
-|---------|--------------|
+| Command | Description |
+|---------|-------------|
 | `make install` | Install all dependencies |
 | `make pre-commit-install` | Wire up git hooks (ruff + detect-secrets) |
 
 **Development**
 
-| Command | What it does |
-|---------|--------------|
-| `make test` | Run all 153 unit tests |
+| Command | Description |
+|---------|-------------|
+| `make test` | Run all 234 unit tests |
 | `make lint` | Check code with ruff |
 | `make lint-fix` | Auto-fix lint errors |
 | `make format` | Auto-format code |
@@ -290,14 +432,21 @@ Run `make help` to see all available commands.
 
 **Blockchain**
 
-| Command | What it does |
-|---------|--------------|
-| `make analyze TX=0x...` | Analyze a transaction (uses `RPC_URL` from `.env`) |
-| `make analyze TX=0x... RPC=https://...` | Analyze with a specific RPC endpoint |
-| `make integration-test` | Run integration test on Sepolia (default: 0.000001 ETH → 0x...dEaD) |
-| `make integration-test AMOUNT=0.00005` | Send custom amount |
-| `make integration-test TO=0xAddress` | Send to custom address |
-| `make integration-test AMOUNT=0.00005 TO=0x...` | Custom amount and recipient |
+| Command | Description |
+|---------|-------------|
+| `make analyze TX=0x...` | Analyze a transaction |
+| `make integration-test` | End-to-end test on Sepolia |
+
+**Pricing**
+
+| Command | Description |
+|---------|-------------|
+| `make pricing-demo` | Run pricing module demo (no network needed) |
+| `make impact-analyzer` | Show price impact table |
+| `make fork` | Start Anvil mainnet fork on port 8545 |
+| `make stop-fork` | Stop running Anvil process |
+| `make test-fork` | Verify AMM math against fork (needs Anvil running) |
+| `make test-mempool` | Watch live mempool for Uniswap swaps (needs `WS_RPC_URL`) |
 
 ---
 
@@ -310,7 +459,7 @@ Run `make help` to see all available commands.
 - `detect-secrets` pre-commit hook blocks accidental commits of secrets
 
 **Financial precision**
-- All amounts use `Decimal` — never `float`
+- All amounts use integer arithmetic or `Decimal` — never `float`
 - `float`: `1.5 * 10**18 = 1499999999999999873` ❌
 - `Decimal`: `Decimal("1.5") * 10**18 = 1500000000000000000` ✅
 
@@ -322,8 +471,16 @@ Run `make help` to see all available commands.
 
 ---
 
-
 ## Changelog
+
+### Week 2 — Pricing Module
+- `pricing/` module: UniswapV2Pair, Route, RouteFinder, PriceImpactAnalyzer, MempoolMonitor, ForkSimulator, PricingEngine
+- AMM math verified against real on-chain transaction (block 12,000,001)
+- Multi-hop routing via DFS with gas-aware route selection
+- ABI decoding via `eth_abi` (replaces manual byte parsing)
+- Gas cost properly converted to output token units via spot price
+- Route gas parameters configurable via constructor
+- 234 unit tests passing
 
 ### Week 1 — Core Infrastructure
 - Project setup: pre-commit, ruff, detect-secrets, Makefile

@@ -84,7 +84,7 @@ def main() -> None:
     print(f"Calculated:  {comparison['calculated']}")
     print(f"Simulated:   {comparison['simulated']}")
     print(f"Difference:  {comparison['difference']}")
-    print(f"Match:       {'✅ YES' if comparison['match'] else '❌ NO'}")
+    print(f"Match:       {'YES' if comparison['match'] else 'NO'}")
 
 
 if __name__ == "__main__":
