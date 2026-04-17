@@ -13,6 +13,8 @@ Designed for MEV, HFT, and on-chain arbitrage strategies.
 | [docs/core.md](docs/core.md) | `Address`, `TokenAmount`, `WalletManager`, `CanonicalSerializer` |
 | [docs/chain.md](docs/chain.md) | `ChainClient`, `TransactionBuilder`, `Analyzer`, error handling |
 | [docs/pricing.md](docs/pricing.md) | `UniswapV2Pair`, `RouteFinder`, `PriceImpactAnalyzer`, `ForkSimulator`, `PricingEngine` |
+| [docs/exchange.md](docs/exchange.md) | `ExchangeClient`, `OrderBookAnalyzer` |
+| [docs/inventory.md](docs/inventory.md) | `InventoryTracker`, `RebalancePlanner`, `PnLEngine` |
 
 ---
 
@@ -28,6 +30,12 @@ Designed for MEV, HFT, and on-chain arbitrage strategies.
 - Monitor Ethereum mempool for pending Uniswap swaps via WebSocket
 - Simulate swaps on a local Anvil fork and verify against local math
 - Full end-to-end integration test on Sepolia testnet
+- Connect to Binance testnet, fetch live order books, and analyze market depth
+- Simulate order fills and slippage across multiple price levels
+- Track inventory across CEX (Binance) and DEX (wallet) venues
+- Detect inventory skew and generate rebalancing plans with fee accounting
+- Record per-trade PnL with gross/net breakdown and CSV export
+- Detect CEX/DEX arbitrage opportunities and validate against real inventory
 
 ---
 
@@ -104,8 +112,15 @@ src/
     ForkSimulator.py      # Swap simulation via Anvil fork
     PricingEngine.py      # Unified pricing interface + Quote validation
     impact_analyzer.py    # CLI for price impact analysis
-  exchange/               # Week 3 — coming soon
-  inventory/              # Week 3 — coming soon
+  exchange/               # Week 3 — CEX connectivity
+    client.py             # ExchangeClient (ccxt/Binance, rate limiter, normalized responses)
+    orderbook.py          # OrderBookAnalyzer (walk-the-book, depth, imbalance, effective spread)
+  inventory/              # Week 3 — portfolio management
+    tracker.py            # InventoryTracker (multi-venue balances, can_execute, skew)
+    rebalancer.py         # RebalancePlanner (transfer plans, fee accounting, min balances)
+    pnl.py                # PnLEngine (per-trade PnL, summary stats, CSV export)
+  integration/            # Week 3 — end-to-end arb detection
+    arb_checker.py        # ArbChecker (DEX price + CEX order book → opportunity assessment)
   strategy/               # Week 4 — coming soon
   executor/               # Week 4 — coming soon
   safety/                 # Week 5 — coming soon
