@@ -12,3 +12,13 @@ BINANCE_CONFIG = {
     },
     'enableRateLimit': True,
 }
+
+BYBIT_CONFIG = {
+    'apiKey': os.getenv('BYBIT_TESTNET_API_KEY'),
+    'secret': os.getenv('BYBIT_TESTNET_SECRET'),
+    'sandbox': True,
+    'options': {
+        'defaultType': 'spot',
+    },
+    'enableRateLimit': True,
+}

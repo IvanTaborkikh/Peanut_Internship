@@ -36,6 +36,8 @@ Designed for MEV, HFT, and on-chain arbitrage strategies.
 - Detect inventory skew and generate rebalancing plans with fee accounting
 - Record per-trade PnL with gross/net breakdown and CSV export
 - Detect CEX/DEX arbitrage opportunities and validate against real inventory
+- Compare prices across two CEX exchanges (Binance vs Bybit) for cross-exchange arb
+- Log every arb opportunity check to CSV with gap, costs, direction and executability
 
 ---
 
@@ -84,6 +86,14 @@ WS_RPC_URL=wss://eth-mainnet.g.alchemy.com/v2/your_key
 
 # Chain ID: 11155111 = Sepolia, 1 = Mainnet
 CHAIN_ID=11155111
+
+# Binance testnet (Week 3)
+BINANCE_TESTNET_API_KEY=your_binance_testnet_key
+BINANCE_TESTNET_SECRET=your_binance_testnet_secret
+
+# Bybit testnet — optional, for multi-exchange arb (Week 3)
+BYBIT_TESTNET_API_KEY=your_bybit_testnet_key
+BYBIT_TESTNET_SECRET=your_bybit_testnet_secret
 ```
 
 > Get a free RPC endpoint at [alchemy.com](https://alchemy.com)
@@ -115,12 +125,14 @@ src/
   exchange/               # Week 3 — CEX connectivity
     client.py             # ExchangeClient (ccxt/Binance, rate limiter, normalized responses)
     orderbook.py          # OrderBookAnalyzer (walk-the-book, depth, imbalance, effective spread)
+    cex_pricer_adapter.py # CexPricingAdapter (wraps ExchangeClient as pricing_engine for CEX-vs-CEX arb)
   inventory/              # Week 3 — portfolio management
     tracker.py            # InventoryTracker (multi-venue balances, can_execute, skew)
     rebalancer.py         # RebalancePlanner (transfer plans, fee accounting, min balances)
     pnl.py                # PnLEngine (per-trade PnL, summary stats, CSV export)
   integration/            # Week 3 — end-to-end arb detection
     arb_checker.py        # ArbChecker (DEX price + CEX order book → opportunity assessment)
+    arb_logger.py         # ArbLogger (append every check() result to CSV for analysis)
   strategy/               # Week 4 — coming soon
   executor/               # Week 4 — coming soon
   safety/                 # Week 5 — coming soon
@@ -130,7 +142,11 @@ scripts/
   test_fork_simulator.py  # Week 2 — Fork simulation verification
   test_mempool.py         # Week 2 — Live mempool monitoring
   start_fork.sh           # Start Anvil mainnet fork
-tests/                    # 234 unit tests
+  smoke_exchange.py       # Week 3 — Binance testnet: order book, balance, fees
+  smoke_orderbook.py      # Week 3 — Formatted order book report with depth analysis
+  smoke_tracker.py        # Week 3 — Inventory snapshot + skew analysis
+  smoke_multi_exchange.py # Week 3 — Multi-exchange arb check (Bybit vs Binance)
+tests/                    # 392 unit tests
 .env                      # Secret config — never commit!
 .env.example              # Safe template
 .pre-commit-config.yaml   # ruff + detect-secrets hooks
@@ -439,7 +455,7 @@ Run `make help` to see all available commands.
 
 | Command | Description |
 |---------|-------------|
-| `make test` | Run all 234 unit tests |
+| `make test` | Run all 392 unit tests |
 | `make lint` | Check code with ruff |
 | `make lint-fix` | Auto-fix lint errors |
 | `make format` | Auto-format code |
@@ -451,6 +467,21 @@ Run `make help` to see all available commands.
 |---------|-------------|
 | `make analyze TX=0x...` | Analyze a transaction |
 | `make integration-test` | End-to-end test on Sepolia |
+
+**Exchange / Inventory (Week 3)**
+
+| Command | Description |
+|---------|-------------|
+| `make smoke-exchange` | Fetch order book, balance and fees from Binance testnet |
+| `make smoke-orderbook` | Formatted order book report `[PAIR=ETH/USDT DEPTH=20]` |
+| `make smoke-tracker` | Inventory snapshot + skew analysis |
+| `make arb-check` | Arb opportunity check `[PAIR=ETH/USDT SIZE=1]` |
+| `make smoke-multi` | Multi-exchange arb: Bybit vs Binance `[PAIR=ETH/USDT SIZE=1]` |
+| `make arb-log` | Show arb opportunity log `[N=20 FILE=arb_log.csv]` |
+| `make rebalance-check` | Show inventory skew across venues |
+| `make rebalance-plan` | Generate transfer plan `[ASSET=ETH]` |
+| `make pnl-summary` | PnL summary (simulated trades) |
+| `make pnl-recent` | Last N trades `[N=5]` |
 
 **Pricing**
 
@@ -487,6 +518,18 @@ Run `make help` to see all available commands.
 ---
 
 ## Changelog
+
+### Week 3 — Exchange, Inventory & Arb Detection
+- `exchange/client.py`: ExchangeClient with rolling-window rate limiter, dynamic limit loading from `/exchangeInfo`, server-side weight sync via `X-MBX-USED-WEIGHT-1M` header
+- `exchange/orderbook.py`: OrderBookAnalyzer — walk-the-book, depth, imbalance, effective spread
+- `exchange/cex_pricer_adapter.py`: CexPricingAdapter — wraps any ExchangeClient as a pricing_engine for CEX-vs-CEX arb
+- `inventory/tracker.py`: InventoryTracker — multi-venue balance tracking, `can_execute`, skew analysis
+- `inventory/rebalancer.py`: RebalancePlanner — transfer plans with fee accounting and minimum operating balance guards
+- `inventory/pnl.py`: PnLEngine — per-trade gross/net PnL, win rate, Sharpe estimate, CSV export
+- `integration/arb_checker.py`: ArbChecker — full arb pipeline: DEX price → gap → costs → inventory → verdict
+- `integration/arb_logger.py`: ArbLogger — appends every check() result to CSV for analysis
+- Multi-exchange support: Bybit testnet via CexPricingAdapter + ArbChecker
+- 392 unit tests passing
 
 ### Week 2 — Pricing Module
 - `pricing/` module: UniswapV2Pair, Route, RouteFinder, PriceImpactAnalyzer, MempoolMonitor, ForkSimulator, PricingEngine

@@ -80,7 +80,7 @@ eff_spread = ob.effective_spread(WALK_SMALL)
 
 lines = [
     '╔' + '═' * (W - 2) + '╗',
-    row(f'{SYMBOL} Order Book Analysis'),
+    row(f'{SYMBOL} Order Book Analysis  (depth: {DEPTH} levels)'),
     row(f'Timestamp: {ts_str}'),
     divider(),
     row(f'Best Bid:    {fmt_price(best_bid_p)} × {fmt_qty(best_bid_q)} {BASE}'),
