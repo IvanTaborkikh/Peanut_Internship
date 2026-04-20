@@ -9,11 +9,14 @@ Expected interface for pricing_engine:
 
 If pricing_engine is None or raises, DEX price falls back to CEX mid.
 """
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.exchange.orderbook import OrderBookAnalyzer
 from src.inventory.tracker import Venue
+
+logger = logging.getLogger(__name__)
 
 # Uniswap V2 swap fee (hardcoded — same for all V2 pairs)
 _DEX_FEE_BPS = Decimal('30')
@@ -89,6 +92,10 @@ class ArbChecker:
             },
         }
         """
+        parts = pair.split('/')
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"Invalid pair format '{pair}' — expected 'BASE/QUOTE' e.g. 'ETH/USDT'")
+
         size_d    = Decimal(str(size))
         timestamp = datetime.now(timezone.utc)
 
@@ -120,7 +127,8 @@ class ArbChecker:
                 if result:
                     dex_price            = Decimal(str(result['price']))
                     dex_price_impact_bps = Decimal(str(result.get('price_impact_bps', 0)))
-            except Exception:
+            except Exception as e:
+                logger.warning(f"pricing_engine.get_dex_price failed ({e}) — falling back to CEX mid")
                 dex_price = None
 
         # Fallback: no DEX price available → use CEX mid
