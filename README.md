@@ -88,10 +88,12 @@ WS_RPC_URL=wss://eth-mainnet.g.alchemy.com/v2/your_key
 CHAIN_ID=11155111
 
 # Binance testnet (Week 3)
+# Get keys at: https://testnet.binance.vision → Log in → Generate HMAC_SHA256 key
 BINANCE_TESTNET_API_KEY=your_binance_testnet_key
 BINANCE_TESTNET_SECRET=your_binance_testnet_secret
 
 # Bybit testnet — optional, for multi-exchange arb (Week 3)
+# Get keys at: https://testnet.bybit.com → Account → API Management → Create New Key
 BYBIT_TESTNET_API_KEY=your_bybit_testnet_key
 BYBIT_TESTNET_SECRET=your_bybit_testnet_secret
 ```
@@ -440,6 +442,178 @@ Watching mempool for Uniswap V2/V3 swaps. Press Ctrl+C to stop.
 
 ---
 
+## Week 3 — Exchange, Inventory & Arb Detection
+
+### What was added
+
+| Module | Description |
+|--------|-------------|
+| `exchange/client.py` | ExchangeClient: ccxt/Binance wrapper with rolling-window rate limiter and dynamic limit loading |
+| `exchange/orderbook.py` | OrderBookAnalyzer: walk-the-book, market depth, imbalance, effective spread |
+| `exchange/cex_pricer_adapter.py` | CexPricingAdapter: wraps any ExchangeClient as pricing_engine for CEX-vs-CEX arb |
+| `inventory/tracker.py` | InventoryTracker: multi-venue balance tracking, `can_execute`, skew analysis |
+| `inventory/rebalancer.py` | RebalancePlanner: transfer plans with fee accounting and min operating balance guards |
+| `inventory/pnl.py` | PnLEngine: per-trade gross/net PnL, win rate, Sharpe estimate, CSV export |
+| `integration/arb_checker.py` | ArbChecker: full arb pipeline — DEX price → gap → costs → inventory → verdict |
+| `integration/arb_logger.py` | ArbLogger: appends every `check()` result to CSV for historical analysis |
+
+### Order Book Analysis
+```bash
+make smoke-orderbook
+make smoke-orderbook PAIR=BTC/USDT DEPTH=50
+```
+```
+╔══════════════════════════════════════════════════════╗
+║  ETH/USDT Order Book Analysis  (depth: 20 levels)     ║
+║  Timestamp: 2026-04-19 12:33:51 UTC                   ║
+╠══════════════════════════════════════════════════════╣
+║  Best Bid:    $2,360.77 × 78.0 ETH                    ║
+║  Best Ask:    $2,360.78 × 56.5 ETH                    ║
+║  Mid Price:   $2,360.78                               ║
+║  Spread:      $0.01 (0.04 bps)                        ║
+╠══════════════════════════════════════════════════════╣
+║  Depth (within 10 bps):                               ║
+║    Bids: 493.8 ETH ($1,165,811)                       ║
+║    Asks: 113.3 ETH ($267,382)                         ║
+║  Imbalance: +0.55 (buy pressure)                      ║
+╠══════════════════════════════════════════════════════╣
+║  Walk-the-book (2 ETH buy):                           ║
+║    Avg price:  $2,360.78                              ║
+║    Slippage:   0.00 bps                               ║
+║    Levels:     1                                      ║
+║  Walk-the-book (10 ETH buy):                          ║
+║    Avg price:  $2,360.78                              ║
+║    Slippage:   0.00 bps                               ║
+║    Levels:     1                                      ║
+╠══════════════════════════════════════════════════════╣
+║  Effective spread (2 ETH round-trip): 0.04 bps        ║
+╚══════════════════════════════════════════════════════╝
+```
+
+### Arb Checker CLI
+```bash
+make arb-check
+make arb-check PAIR=ETH/USDT SIZE=2
+```
+```
+═══════════════════════════════════════════
+  ARB CHECK: ETH/USDT (size: 2.0 ETH)
+═══════════════════════════════════════════
+
+Prices:
+  DEX (mid fallback):      $  2,358.26
+  Binance bid:             $  2,358.26
+  Binance ask:             $  2,358.27
+
+Gap: $0.00 (0.0 bps)
+
+Costs:
+  DEX fee:           30.0 bps
+  DEX price impact:  0.0 bps
+  CEX fee:           10.0 bps
+  CEX slippage:      0.0 bps
+  Gas:               $5.00 (10.6 bps)
+  ────────────────────────
+  Total costs:       50.6 bps
+
+Net PnL estimate: -50.6 bps  ❌ NOT PROFITABLE
+
+Inventory:
+  N/A — no arb direction
+
+Verdict: SKIP — costs exceed gap
+═══════════════════════════════════════════
+```
+
+### Multi-Exchange Arb (Bybit vs Binance)
+```bash
+make smoke-multi
+make smoke-multi PAIR=SOL/USDT SIZE=5
+```
+```
+══════════════════════════════════════════════════
+  MULTI-EXCHANGE ARB: ETH/USDT  (size: 1.0 ETH)
+  Bybit vs Binance
+══════════════════════════════════════════════════
+
+  Bybit        mid:  $  2,310.18
+  Binance bid:       $  2,310.17
+  Binance ask:       $  2,310.18
+
+  Gap:     0.00 bps
+  Costs:   61.64 bps
+  Net PnL: -61.64 bps  ❌ NOT PROFITABLE
+
+  Direction: none — prices within spread
+  Verdict:   SKIP — costs exceed gap
+
+  Logged to arb_log.csv
+══════════════════════════════════════════════════
+```
+
+### Inventory Rebalancer CLI
+```bash
+make rebalance-check
+make rebalance-plan ASSET=ETH
+```
+```
+Inventory Skew Report
+═══════════════════════════════════════════
+
+Asset: ETH
+  binance :        1.0 (17%)  ← deviation: +33%
+  wallet  :        5.0 (83%)  ← deviation: +33%
+  Status: ⚠  NEEDS REBALANCE (max deviation: 33.3%)
+
+Asset: USDC
+  binance :    10000.0 (77%)  ← deviation: +27%
+  wallet  :     3000.0 (23%)  ← deviation: +27%
+  Status: ✓  OK (max deviation: 26.9%)
+
+═══════════════════════════════════════════
+
+Rebalance Plan: ETH
+───────────────────────────────────────────
+Transfer 1:
+  From:   wallet
+  To:     binance
+  Amount: 2 ETH
+  Fee:    0.005 ETH
+  Net:    1.995 ETH
+  ETA:    ~15 min
+
+  Result:
+  Binance : 2.995 ETH (50%)
+  Wallet  : 3.000 ETH (50%)
+
+Estimated total fee: 0.005 (max 15 min)
+```
+
+### Arb Opportunity Log
+```bash
+make arb-log
+make arb-log N=50
+```
+```
+Arb Log: arb_log.csv
+═══════════════════════════════════════════
+  Total checks:     24
+  With direction:   3
+  Executable:       0
+  Avg gap (bps):    0.04
+  Avg net PnL:      -52.30 bps
+  Best gap:         0.21 bps
+
+Last 5 entries:
+───────────────────────────────────────────
+     14:42  ETH/USDT  none                  gap=0.0  net=-61.6 bps
+     14:38  ETH/USDT  none                  gap=0.0  net=-61.7 bps
+     14:35  ETH/USDT  buy_dex_sell_cex      gap=0.2  net=-50.4 bps
+═══════════════════════════════════════════
+```
+
+---
+
 ## Make Commands
 
 Run `make help` to see all available commands.
@@ -453,13 +627,13 @@ Run `make help` to see all available commands.
 
 **Development**
 
-| Command | Description |
-|---------|-------------|
-| `make test` | Run all 392 unit tests |
-| `make lint` | Check code with ruff |
-| `make lint-fix` | Auto-fix lint errors |
-| `make format` | Auto-format code |
-| `make clean` | Remove cache files |
+| Command | Description            |
+|---------|------------------------|
+| `make test` | Run all 396 unit tests |
+| `make lint` | Check code with ruff   |
+| `make lint-fix` | Auto-fix lint errors   |
+| `make format` | Auto-format code       |
+| `make clean` | Remove cache files     |
 
 **Blockchain**
 

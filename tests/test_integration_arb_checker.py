@@ -348,3 +348,52 @@ def test_execution_price_is_cex_ask_for_buy_cex():
     result  = checker.check('ETH/USDT')
     assert result['direction']       == 'buy_cex_sell_dex'
     assert result['execution_price'] == Decimal('2011')
+
+
+# ---------------------------------------------------------------------------
+# Pair validation
+# ---------------------------------------------------------------------------
+
+def test_invalid_pair_no_slash_raises():
+    """Pair without '/' raises ValueError."""
+    checker = make_checker()
+    with pytest.raises(ValueError, match='ETHUSDT'):
+        checker.check('ETHUSDT')
+
+
+def test_invalid_pair_too_many_parts_raises():
+    """Pair with two slashes raises ValueError."""
+    checker = make_checker()
+    with pytest.raises(ValueError):
+        checker.check('ETH/USDT/BUSD')
+
+
+def test_invalid_pair_empty_part_raises():
+    """Pair with empty base or quote raises ValueError."""
+    checker = make_checker()
+    with pytest.raises(ValueError):
+        checker.check('/USDT')
+
+
+# ---------------------------------------------------------------------------
+# Pricing engine fallback logging
+# ---------------------------------------------------------------------------
+
+def test_warning_logged_when_pricing_engine_raises(caplog):
+    """Warning is logged when pricing_engine raises, before falling back to CEX mid."""
+    import logging
+    bad_pricer = MagicMock()
+    bad_pricer.get_dex_price.side_effect = RuntimeError('timeout')
+
+    checker = ArbChecker(
+        pricing_engine=bad_pricer,
+        exchange_client=make_cex_client('2010', '2012'),
+        inventory_tracker=make_tracker(),
+        pnl_engine=MagicMock(),
+    )
+
+    with caplog.at_level(logging.WARNING, logger='src.integration.arb_checker'):
+        result = checker.check('ETH/USDT')
+
+    assert result['dex_price_is_fallback'] is True
+    assert any('timeout' in r.message for r in caplog.records)
