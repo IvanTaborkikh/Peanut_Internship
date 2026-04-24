@@ -23,8 +23,8 @@ load_dotenv()
 FORK_URL = "http://localhost:8545"
 
 from src.core.types import Address, Token          # noqa: E402
-from src.pricing.ForkSimulator import ForkSimulator  # noqa: E402
-from src.pricing.UniswapV2Pair import UniswapV2Pair  # noqa: E402
+from src.pricing.fork_simulator import ForkSimulator  # noqa: E402
+from src.pricing.uniswap_v2_pair import UniswapV2Pair  # noqa: E402
 from src.chain.client import ChainClient             # noqa: E402
 
 WETH = Token(Address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), "WETH", 18)

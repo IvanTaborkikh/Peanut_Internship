@@ -16,8 +16,8 @@ import sys
 from decimal import Decimal
 
 from src.core.types import Address, Token
-from src.pricing.PriceImpactAnalyzer import PriceImpactAnalyzer
-from src.pricing.UniswapV2Pair import UniswapV2Pair
+from src.pricing.price_impact_analyzer import PriceImpactAnalyzer
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
 
 # ── Demo pools (no RPC needed) ────────────────────────────────────────────────
 

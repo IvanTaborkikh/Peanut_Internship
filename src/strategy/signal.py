@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 import time
 import uuid
@@ -14,18 +15,18 @@ class Signal:
     pair: str
     direction: Direction
 
-    cex_price: float
-    dex_price: float
-    spread_bps: float
-    size: float
+    cex_price: Decimal
+    dex_price: Decimal
+    spread_bps: Decimal
+    size: Decimal
 
-    expected_gross_pnl: float
-    expected_fees: float
-    expected_net_pnl: float
+    expected_gross_pnl: Decimal
+    expected_fees: Decimal
+    expected_net_pnl: Decimal
 
-    score: float
-    timestamp: float
-    expiry: float
+    score: Decimal
+    timestamp: float  # Unix timestamp — time.time()
+    expiry: float     # Unix timestamp — time.time() + ttl
 
     inventory_ok: bool
     within_limits: bool
@@ -49,5 +50,5 @@ class Signal:
             self.score > 0
         )
 
-    def age_seconds(self) -> float:
+    def age_seconds(self) -> float:  # returns time duration, not a financial value
         return time.time() - self.timestamp

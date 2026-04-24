@@ -28,11 +28,13 @@ class CircuitBreaker:
             self.trip()
 
     def record_success(self):
-        pass  # Could reset on success
+        now = time.time()
+        self.failures = [t for t in self.failures if t > now - self.config.window_seconds]
 
     def trip(self):
         self.tripped_at = time.time()
-        logging.critical("CIRCUIT BREAKER TRIPPED")
+        logging.warning("Circuit breaker tripped — trading paused for %.0fs",
+                        self.config.cooldown_seconds)
 
     def is_open(self) -> bool:
         if self.tripped_at is None:
@@ -49,7 +51,7 @@ class CircuitBreaker:
         return max(0, self.config.cooldown_seconds - (time.time() - self.tripped_at))
 
 class ReplayProtection:
-    def __init__(self, ttl_seconds: float = 60):
+    def __init__(self, ttl_seconds: float = 30):  # signals expire in ~5s; 30s is a 6x safety margin
         self.executed: dict[str, float] = {}
         self.ttl = ttl_seconds
 

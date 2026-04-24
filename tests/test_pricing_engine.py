@@ -1,10 +1,10 @@
 import pytest
 import time
 from unittest.mock import MagicMock, patch
-from src.pricing.PricingEngine import PricingEngine, Quote, QuoteError
-from src.pricing.ForkSimulator import SimulationResult
-from src.pricing.UniswapV2Pair import UniswapV2Pair
-from src.pricing.Route import Route
+from src.pricing.pricing_engine import PricingEngine, Quote, QuoteError
+from src.pricing.fork_simulator import SimulationResult
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
+from src.pricing.route import Route
 from src.core.types import Address, Token
 
 WETH = Token(address=Address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), symbol="WETH", decimals=18)
@@ -22,8 +22,8 @@ PAIR = UniswapV2Pair(
 def make_engine() -> PricingEngine:
     """PricingEngine with all external deps mocked."""
     mock_client = MagicMock()
-    with patch("src.pricing.PricingEngine.ForkSimulator"), \
-         patch("src.pricing.PricingEngine.MempoolMonitor"):
+    with patch("src.pricing.pricing_engine.ForkSimulator"), \
+         patch("src.pricing.pricing_engine.MempoolMonitor"):
         engine = PricingEngine(
             chain_client=mock_client,
             fork_url="http://localhost:8545",
@@ -36,7 +36,7 @@ def engine_with_pool() -> PricingEngine:
     """Engine with WETH/USDC pool pre-loaded (no RPC needed)."""
     engine = make_engine()
     engine.pools[PAIR.address] = PAIR
-    from src.pricing.RouteFinder import RouteFinder
+    from src.pricing.route_finder import RouteFinder
     engine.router = RouteFinder([PAIR])
     return engine
 
@@ -163,7 +163,7 @@ def test_refresh_pool_updates_pool_and_rebuilds_router():
 # ── PricingEngine._on_mempool_swap ────────────────────────────────────────────
 
 def test_on_mempool_swap_ignores_swap_with_no_tokens():
-    from src.pricing.MempoolMonitor import ParsedSwap
+    from src.pricing.mempool_monitor import ParsedSwap
     engine = engine_with_pool()
 
     swap = ParsedSwap(
@@ -179,7 +179,7 @@ def test_on_mempool_swap_ignores_swap_with_no_tokens():
 
 
 def test_on_mempool_swap_triggers_refresh_for_matching_pool():
-    from src.pricing.MempoolMonitor import ParsedSwap
+    from src.pricing.mempool_monitor import ParsedSwap
     engine = engine_with_pool()
 
     new_pair = UniswapV2Pair(
