@@ -1,6 +1,6 @@
 from decimal import Decimal
-from src.pricing.UniswapV2Pair import UniswapV2Pair
-from src.pricing.PriceImpactAnalyzer import PriceImpactAnalyzer
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
+from src.pricing.price_impact_analyzer import PriceImpactAnalyzer
 from src.core.types import Address, Token
 
 WETH = Token(address=Address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), symbol="WETH", decimals=18)

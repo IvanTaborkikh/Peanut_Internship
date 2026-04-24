@@ -1,0 +1,284 @@
+import asyncio
+import time
+from dataclasses import dataclass, field
+from decimal import Decimal
+from enum import Enum, auto
+from typing import Optional
+
+from src.strategy.signal import Signal, Direction
+from src.executor.recovery import CircuitBreaker, ReplayProtection
+
+
+class ExecutorState(Enum):
+    IDLE         = auto()
+    VALIDATING   = auto()
+    LEG1_PENDING = auto()
+    LEG1_FILLED  = auto()
+    LEG2_PENDING = auto()
+    DONE         = auto()
+    PARTIAL      = auto()       # leg1 partially filled, below threshold — unwound successfully
+    REJECTED     = auto()       # refused before any trade was placed (circuit breaker / duplicate / stale signal)
+    FAILED       = auto()       # execution started but something went wrong — position may have existed but was unwound
+    UNWINDING    = auto()
+    UNWIND_FAILED = auto()      # unwind itself failed — open position stuck, manual action required
+
+
+@dataclass
+class ExecutionContext:
+    signal: Signal
+    state: ExecutorState = ExecutorState.IDLE
+
+    leg1_venue: str = ""
+    leg1_order_id: Optional[str] = None
+    leg1_fill_price: Optional[Decimal] = None
+    leg1_fill_size: Optional[Decimal] = None
+
+    leg2_venue: str = ""
+    leg2_tx_hash: Optional[str] = None
+    leg2_fill_price: Optional[Decimal] = None
+    leg2_fill_size: Optional[Decimal] = None
+
+    started_at: float = field(default_factory=time.time)  # Unix timestamp
+    finished_at: Optional[float] = None                   # Unix timestamp
+    actual_net_pnl: Optional[Decimal] = None
+    execution_quality: Optional[Decimal] = None  # actual_pnl / expected_pnl, 1.0 = perfect
+    error: Optional[str] = None
+
+
+@dataclass
+class ExecutorConfig:
+    leg1_timeout: float = 5.0   # seconds — passed to asyncio.wait_for
+    leg2_timeout: float = 60.0  # seconds — passed to asyncio.wait_for
+    min_fill_ratio: Decimal = Decimal('0.8')
+    use_flashbots: bool = True
+    simulation_mode: bool = True
+    gas_cost_usd: Decimal = Decimal('0.5')
+
+
+class Executor:
+    """Execute arbitrage trades across CEX and DEX."""
+
+    def __init__(self, exchange_client, pricing_module, inventory_tracker,
+                 config: Optional[ExecutorConfig] = None):
+        self.exchange = exchange_client
+        self.pricing = pricing_module
+        self.inventory = inventory_tracker
+        self.config = config or ExecutorConfig()
+
+        self.circuit_breaker = CircuitBreaker()
+        self.replay_protection = ReplayProtection()
+
+    async def execute(self, signal: Signal) -> ExecutionContext:
+        ctx = ExecutionContext(signal=signal)
+
+        # Pre-flight checks — nothing traded yet → REJECTED (not FAILED)
+        if self.circuit_breaker.is_open():
+            ctx.state = ExecutorState.REJECTED
+            ctx.error = "Circuit breaker open"
+            return ctx
+
+        if self.replay_protection.is_duplicate(signal):
+            ctx.state = ExecutorState.REJECTED
+            ctx.error = "Duplicate signal"
+            return ctx
+
+        ctx.state = ExecutorState.VALIDATING
+        if not signal.is_valid():
+            ctx.state = ExecutorState.REJECTED
+            ctx.error = "Signal invalid"
+            return ctx
+
+        # Execute — always record result even if an unexpected exception bubbles up
+        try:
+            if self.config.use_flashbots:
+                ctx = await self._execute_dex_first(ctx)
+            else:
+                ctx = await self._execute_cex_first(ctx)
+        except Exception as e:
+            ctx.state = ExecutorState.FAILED
+            ctx.error = f"Unexpected error: {e}"
+        finally:
+            self.replay_protection.mark_executed(signal)
+            if ctx.state == ExecutorState.DONE:
+                self.circuit_breaker.record_success()
+            elif ctx.state not in (ExecutorState.REJECTED,):
+                self.circuit_breaker.record_failure()
+            ctx.finished_at = time.time()
+
+        return ctx
+
+    async def _execute_cex_first(self, ctx: ExecutionContext) -> ExecutionContext:
+        """CEX leg first (default for non-Flashbots)."""
+        signal = ctx.signal
+
+        # Leg 1: CEX
+        ctx.state = ExecutorState.LEG1_PENDING
+        ctx.leg1_venue = 'cex'
+
+        try:
+            leg1 = await asyncio.wait_for(
+                self._execute_cex_leg(signal),
+                timeout=self.config.leg1_timeout
+            )
+        except asyncio.TimeoutError:
+            # IOC order either filled or was cancelled — no position
+            ctx.state = ExecutorState.FAILED
+            ctx.error = "CEX timeout"
+            return ctx
+
+        if not leg1['success']:
+            ctx.state = ExecutorState.FAILED
+            ctx.error = leg1.get('error', 'CEX rejected')
+            return ctx
+
+        # Partial fill below threshold — we have a partial CEX position, must unwind
+        if leg1['filled'] / signal.size < self.config.min_fill_ratio:
+            ctx.leg1_fill_price = leg1['price']
+            ctx.leg1_fill_size = leg1['filled']
+            ctx.state = ExecutorState.UNWINDING
+            unwind_ok = await self._unwind(ctx)
+            if unwind_ok:
+                ctx.state = ExecutorState.PARTIAL
+                ctx.error = "Partial fill below threshold — unwound"
+            else:
+                ctx.state = ExecutorState.UNWIND_FAILED
+                ctx.error = "Partial fill below threshold — UNWIND FAILED, manual action required"
+            return ctx
+
+        ctx.leg1_fill_price = leg1['price']
+        ctx.leg1_fill_size = leg1['filled']
+        ctx.state = ExecutorState.LEG1_FILLED
+
+        # Leg 2: DEX
+        ctx.state = ExecutorState.LEG2_PENDING
+        ctx.leg2_venue = 'dex'
+
+        try:
+            leg2 = await asyncio.wait_for(
+                self._execute_dex_leg(signal, ctx.leg1_fill_size),
+                timeout=self.config.leg2_timeout
+            )
+        except asyncio.TimeoutError:
+            ctx.state = ExecutorState.UNWINDING
+            unwind_ok = await self._unwind(ctx)
+            ctx.state = ExecutorState.FAILED if unwind_ok else ExecutorState.UNWIND_FAILED
+            ctx.error = "DEX timeout - unwound" if unwind_ok else "DEX timeout - UNWIND FAILED, manual action required"
+            return ctx
+
+        if not leg2['success']:
+            ctx.state = ExecutorState.UNWINDING
+            unwind_ok = await self._unwind(ctx)
+            ctx.state = ExecutorState.FAILED if unwind_ok else ExecutorState.UNWIND_FAILED
+            ctx.error = "DEX failed - unwound" if unwind_ok else "DEX failed - UNWIND FAILED, manual action required"
+            return ctx
+
+        ctx.leg2_fill_price = leg2['price']
+        ctx.leg2_fill_size = leg2['filled']
+        ctx.actual_net_pnl = self._calculate_pnl(ctx)
+        if ctx.signal.expected_net_pnl:
+            ctx.execution_quality = ctx.actual_net_pnl / ctx.signal.expected_net_pnl
+        ctx.state = ExecutorState.DONE
+        return ctx
+
+    async def _execute_dex_first(self, ctx: ExecutionContext) -> ExecutionContext:
+        """DEX leg first (when using Flashbots - failed tx = no cost)."""
+        signal = ctx.signal
+
+        # Leg 1: DEX
+        ctx.state = ExecutorState.LEG1_PENDING
+        ctx.leg1_venue = 'dex'
+
+        try:
+            leg1 = await asyncio.wait_for(
+                self._execute_dex_leg(signal, signal.size),
+                timeout=self.config.leg2_timeout
+            )
+        except asyncio.TimeoutError:
+            # Flashbots dropped the tx — no position, no gas cost
+            ctx.state = ExecutorState.REJECTED
+            ctx.error = "DEX timeout (Flashbots dropped)"
+            return ctx
+
+        if not leg1['success']:
+            # Flashbots reverted — no position, no gas cost
+            ctx.state = ExecutorState.REJECTED
+            ctx.error = "DEX failed (no cost via Flashbots)"
+            return ctx
+
+        ctx.leg1_fill_price = leg1['price']
+        ctx.leg1_fill_size = leg1['filled']
+        ctx.state = ExecutorState.LEG1_FILLED
+
+        # Leg 2: CEX
+        ctx.state = ExecutorState.LEG2_PENDING
+        ctx.leg2_venue = 'cex'
+
+        try:
+            leg2 = await asyncio.wait_for(
+                self._execute_cex_leg(signal, ctx.leg1_fill_size),
+                timeout=self.config.leg1_timeout
+            )
+        except asyncio.TimeoutError:
+            ctx.state = ExecutorState.UNWINDING
+            unwind_ok = await self._unwind(ctx)
+            ctx.state = ExecutorState.FAILED if unwind_ok else ExecutorState.UNWIND_FAILED
+            ctx.error = "CEX timeout after DEX - unwound" if unwind_ok else "CEX timeout after DEX - UNWIND FAILED, manual action required"
+            return ctx
+
+        if not leg2['success']:
+            ctx.state = ExecutorState.UNWINDING
+            unwind_ok = await self._unwind(ctx)
+            ctx.state = ExecutorState.FAILED if unwind_ok else ExecutorState.UNWIND_FAILED
+            ctx.error = "CEX failed after DEX - unwound" if unwind_ok else "CEX failed after DEX - UNWIND FAILED, manual action required"
+            return ctx
+
+        ctx.leg2_fill_price = leg2['price']
+        ctx.leg2_fill_size = leg2['filled']
+        ctx.actual_net_pnl = self._calculate_pnl(ctx)
+        if ctx.signal.expected_net_pnl:
+            ctx.execution_quality = ctx.actual_net_pnl / ctx.signal.expected_net_pnl
+        ctx.state = ExecutorState.DONE
+        return ctx
+
+    async def _execute_cex_leg(self, signal: Signal, size: Optional[Decimal] = None) -> dict:
+        actual_size = size or signal.size
+        if self.config.simulation_mode:
+            await asyncio.sleep(0.1)
+            return {'success': True, 'price': signal.cex_price * Decimal('1.0001'), 'filled': actual_size}
+        side = 'buy' if signal.direction == Direction.BUY_CEX_SELL_DEX else 'sell'
+        result = self.exchange.create_limit_ioc_order(
+            symbol=signal.pair, side=side, amount=actual_size,
+            price=signal.cex_price * Decimal('1.001'),
+        )
+        return {'success': result['status'] == 'filled',
+                'price': Decimal(str(result['avg_fill_price'])),
+                'filled': Decimal(str(result['amount_filled'])),
+                'error': result['status']}
+
+    async def _execute_dex_leg(self, signal: Signal, size: Decimal) -> dict:
+        if self.config.simulation_mode:
+            await asyncio.sleep(0.5)
+            return {'success': True, 'price': signal.dex_price * Decimal('0.9998'), 'filled': size}
+        raise NotImplementedError("Real DEX execution requires Week 2 integration")
+
+    async def _unwind(self, ctx: ExecutionContext) -> bool:
+        """Market sell to flatten stuck position. Returns True if successful."""
+        if self.config.simulation_mode:
+            await asyncio.sleep(0.1)
+            return True
+        raise NotImplementedError("Real unwind not implemented")
+
+    def _calculate_pnl(self, ctx: ExecutionContext) -> Decimal:
+        signal = ctx.signal
+        cex_price = ctx.leg1_fill_price if ctx.leg1_venue == 'cex' else ctx.leg2_fill_price
+        dex_price = ctx.leg1_fill_price if ctx.leg1_venue == 'dex' else ctx.leg2_fill_price
+        cex_size = ctx.leg1_fill_size if ctx.leg1_venue == 'cex' else ctx.leg2_fill_size
+        dex_size = ctx.leg1_fill_size if ctx.leg1_venue == 'dex' else ctx.leg2_fill_size
+        matched = min(cex_size, dex_size)  # only count the hedged portion
+        if signal.direction == Direction.BUY_CEX_SELL_DEX:
+            gross = (dex_price - cex_price) * matched
+        else:
+            gross = (cex_price - dex_price) * matched
+        cex_fee = cex_size * cex_price * Decimal('0.001')  # 10 bps taker
+        dex_fee = dex_size * dex_price * Decimal('0.003')  # 30 bps swap fee
+        return gross - cex_fee - dex_fee - self.config.gas_cost_usd

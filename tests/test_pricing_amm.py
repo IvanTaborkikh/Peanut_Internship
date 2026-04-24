@@ -1,5 +1,5 @@
 from decimal import Decimal
-from src.pricing.UniswapV2Pair import UniswapV2Pair
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
 from src.core.types import Address, Token
 
 # ── Test fixtures ─────────────────────────────────────────────────────────────

@@ -4,8 +4,8 @@ from typing import Optional
 from web3 import Web3
 
 from src.core.types import Address, Token
-from src.pricing.Route import Route
-from src.pricing.UniswapV2Pair import UniswapV2Pair
+from src.pricing.route import Route
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
 
 
 @dataclass

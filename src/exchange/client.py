@@ -272,7 +272,7 @@ class ExchangeClient:
         }
         """
         self._rate_limit()
-        logger.info("fetch_balance: requesting account balances")
+        logger.debug("fetch_balance: requesting account balances")
 
         try:
             raw = self._exchange.fetch_balance()
@@ -300,7 +300,7 @@ class ExchangeClient:
                 result[asset] = {'free': free, 'locked': locked, 'total': total}
 
         self._sync_weight_from_response()
-        logger.info(f"fetch_balance: non-zero assets={list(result.keys())}")
+        logger.debug(f"fetch_balance: non-zero assets={list(result.keys())}")
         return result
 
     def create_limit_ioc_order(

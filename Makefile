@@ -1,4 +1,4 @@
-.PHONY: run test lint format lint-fix install pre-commit-install clean analyze integration-test pricing-demo impact-analyzer test-mempool test-fork fork stop-fork smoke-exchange smoke-orderbook smoke-tracker arb-check rebalance-check rebalance-plan pnl-summary pnl-recent smoke-multi arb-log help
+.PHONY: run test lint format lint-fix install pre-commit-install clean analyze integration-test pricing-demo impact-analyzer test-mempool test-fork fork stop-fork smoke-exchange smoke-orderbook smoke-tracker arb-check rebalance-check rebalance-plan pnl-summary pnl-recent smoke-multi arb-log smoke e2e bot sim help
 
 # ── OS detection ──────────────────────────────────────────────────────────────
 ifeq ($(OS),Windows_NT)
@@ -49,6 +49,16 @@ help:
 	@echo "    make rebalance-plan           Generate transfer plan  [ASSET=ETH]"
 	@echo "    make pnl-summary              PnL summary (simulated trades)"
 	@echo "    make pnl-recent               Last N trades  [N=5]"
+	@echo ""
+	@echo "  Bot (Week 4)"
+	@echo "    make smoke                Quick end-to-end smoke test (no keys needed, 5 ticks)"
+	@echo "    make e2e                  Full e2e test — 8 scenarios (replay, CB, partial fill, etc.)"
+	@echo "    make bot                  Run arb bot in simulation mode (Ctrl+C to stop)"
+	@echo "    make bot PAIR=BTC/USDT    Run with custom pair"
+	@echo "    make sim                  Realistic market simulation (100 ticks, random prices)"
+	@echo "    make sim TICKS=200        Custom tick count"
+	@echo "    make sim SEED=42          Reproducible run with fixed seed"
+	@echo "    make sim VERBOSE=1        Show per-tick log output"
 	@echo ""
 	@echo "  Pricing"
 	@echo "    make pricing-demo             Run pricing module demo (no network needed)"
@@ -138,3 +148,18 @@ smoke-multi:
 
 arb-log:
 	PYTHONPATH=. $(PYTHON) -m src.integration.arb_logger $(if $(N),--tail $(N),) $(if $(FILE),--file $(FILE),)
+
+smoke:
+	PYTHONPATH=. $(PYTHON) scripts/smoke_test.py
+
+e2e:
+	PYTHONPATH=. $(PYTHON) scripts/bot_e2e_test.py
+
+bot:
+	PYTHONPATH=. $(PYTHON) scripts/arb_bot.py
+
+sim:
+	PYTHONPATH=. $(PYTHON) scripts/realistic_sim.py \
+		$(if $(TICKS),--ticks $(TICKS),) \
+		$(if $(SEED),--seed $(SEED),) \
+		$(if $(VERBOSE),--verbose,)

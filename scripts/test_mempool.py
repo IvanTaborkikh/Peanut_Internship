@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.pricing.MempoolMonitor import MempoolMonitor, ParsedSwap  # noqa: E402
+from src.pricing.mempool_monitor import MempoolMonitor, ParsedSwap  # noqa: E402
 
 WS_URL = os.getenv("WS_RPC_URL") or os.getenv("MAINNET_WS_URL")
 

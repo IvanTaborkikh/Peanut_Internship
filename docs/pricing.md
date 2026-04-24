@@ -26,7 +26,7 @@ Data flows top to bottom: raw reserves → AMM math → route selection → fork
 Represents a single Uniswap V2 liquidity pool. All math uses integer arithmetic only — no floats — to match the Solidity contract exactly.
 
 ```python
-from src.pricing.UniswapV2Pair import UniswapV2Pair
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
 from src.core.types import Address, Token
 
 WETH = Token(address=Address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), symbol="WETH", decimals=18)
@@ -36,9 +36,9 @@ pair = UniswapV2Pair(
     address=Address("0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"),
     token0=WETH,
     token1=USDC,
-    reserve0=1_000 * 10**18,   # 1000 ETH
-    reserve1=2_000_000 * 10**6, # 2M USDC
-    fee_bps=30,                 # 0.30% fee (default)
+    reserve0=1_000 * 10 ** 18,  # 1000 ETH
+    reserve1=2_000_000 * 10 ** 6,  # 2M USDC
+    fee_bps=30,  # 0.30% fee (default)
 )
 ```
 
@@ -97,7 +97,7 @@ pair = UniswapV2Pair.from_chain(Address("0xB4e16..."), chain_client)
 Represents a specific swap path through one or more pools.
 
 ```python
-from src.pricing.Route import Route
+from src.pricing.route import Route
 
 # Direct: WETH → USDC
 route = Route(pools=[pair], path=[WETH, USDC])
@@ -127,7 +127,7 @@ Validation: constructor raises `ValueError` if pool count ≠ path length - 1, o
 Finds all routes between two tokens using DFS on a token graph, then selects the best one by net output after gas cost.
 
 ```python
-from src.pricing.RouteFinder import RouteFinder
+from src.pricing.route_finder import RouteFinder
 
 finder = RouteFinder(pools=[pair_eth_usdc, pair_eth_dai, pair_dai_usdc])
 
@@ -135,10 +135,10 @@ finder = RouteFinder(pools=[pair_eth_usdc, pair_eth_dai, pair_dai_usdc])
 routes = finder.find_all_routes(WETH, USDC, max_hops=3)
 
 # Best route by net output after gas
-route, net_output = finder.find_best_route(WETH, USDC, 1 * 10**18, gas_price_gwei=20)
+route, net_output = finder.find_best_route(WETH, USDC, 1 * 10 ** 18, gas_price_gwei=20)
 
 # Comparison table
-table = finder.compare_routes(WETH, USDC, 1 * 10**18, gas_price_gwei=20)
+table = finder.compare_routes(WETH, USDC, 1 * 10 ** 18, gas_price_gwei=20)
 # → list of RouteComparison(route, gross_output, gas_estimate, gas_cost, net_output)
 ```
 
@@ -167,7 +167,7 @@ finder.update_pool(new_pair)  # updates one pool and rebuilds graph — no full 
 Analyzes how trade size affects price for a single pool.
 
 ```python
-from src.pricing.PriceImpactAnalyzer import PriceImpactAnalyzer
+from src.pricing.price_impact_analyzer import PriceImpactAnalyzer
 from decimal import Decimal
 
 analyzer = PriceImpactAnalyzer(pair)
@@ -207,10 +207,12 @@ print(cost["effective_price"])  # Decimal: token_in per token_out
 Listens to Ethereum mempool via WebSocket and calls a callback for every recognized Uniswap swap.
 
 ```python
-from src.pricing.MempoolMonitor import MempoolMonitor
+from src.pricing.mempool_monitor import MempoolMonitor
+
 
 def on_swap(swap):
     print(swap.dex, swap.method, swap.amount_in)
+
 
 monitor = MempoolMonitor(ws_url="wss://eth-mainnet.g.alchemy.com/v2/...", callback=on_swap)
 await monitor.start()  # runs indefinitely
@@ -248,7 +250,7 @@ ABI decoding uses `eth_abi.decode` — no manual byte parsing.
 Simulates swaps on a local [Anvil](https://book.getfoundry.sh/anvil/) fork using `getAmountsOut` — a view call that requires no token approvals and costs no gas.
 
 ```python
-from src.pricing.ForkSimulator import ForkSimulator
+from src.pricing.fork_simulator import ForkSimulator
 
 simulator = ForkSimulator("http://localhost:8545")
 ```
@@ -284,7 +286,7 @@ comparison = simulator.compare_simulation_vs_calculation(pair, 1 * 10**18, WETH)
 The main interface. Wires together pools, routing, simulation, and mempool monitoring.
 
 ```python
-from src.pricing.PricingEngine import PricingEngine
+from src.pricing.pricing_engine import PricingEngine
 
 engine = PricingEngine(
     chain_client=client,

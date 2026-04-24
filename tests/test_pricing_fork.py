@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
-from src.pricing.ForkSimulator import ForkSimulator, SimulationResult
-from src.pricing.UniswapV2Pair import UniswapV2Pair
-from src.pricing.Route import Route
+from src.pricing.fork_simulator import ForkSimulator, SimulationResult
+from src.pricing.uniswap_v2_pair import UniswapV2Pair
+from src.pricing.route import Route
 from src.core.types import Address, Token
 
 WETH = Token(address=Address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), symbol="WETH", decimals=18)
@@ -18,7 +18,7 @@ PAIR = UniswapV2Pair(
 
 def make_simulator() -> ForkSimulator:
     """ForkSimulator with mocked Web3 — no real RPC needed."""
-    with patch("src.pricing.ForkSimulator.Web3"):
+    with patch("src.pricing.fork_simulator.Web3"):
         sim = ForkSimulator("http://localhost:8545")
     return sim
 
