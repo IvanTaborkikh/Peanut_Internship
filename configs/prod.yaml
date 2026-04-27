@@ -1,0 +1,47 @@
+# PROD mode: Binance mainnet for CEX, mainnet RPC for DEX.
+# dry_run=true is the safety default — flip to false only when you've reviewed
+# unwind paths, balances and circuit-breaker tuning.
+mode: prod
+dry_run: true
+
+cex:
+  exchange: binance
+  api_key:  "${BINANCE_API_KEY}"
+  secret:   "${BINANCE_SECRET}"
+  testnet:  false
+
+wallet:
+  private_key: "${PRIVATE_KEY}"
+
+chains:
+  - chain_id: 1
+    rpc_url: "${MAINNET_RPC_URL}"
+    ws_url:  "${WS_RPC_URL}"
+  - chain_id: 42161
+    rpc_url: "${RPC_URL}"
+
+pairs:
+  - pair: ETH/USDT
+    chain_id: 1
+    trade_size: "0.1"
+
+fees:
+  cex_taker_bps: "10"
+  cex_maker_bps: "2"
+  dex_swap_bps:  "30"
+  gas_cost_usd_default: "5.0"
+
+signal:
+  min_spread_bps:    "65"
+  min_profit_usd:    "10"
+  max_position_usd:  "5000"
+  signal_ttl_seconds: 3.0
+  cooldown_seconds:   5.0
+  min_score:         "70"
+
+executor:
+  leg1_timeout_seconds: 5.0
+  leg2_timeout_seconds: 60.0
+  min_fill_ratio:       "0.8"
+  slippage_bps:         "30"
+  use_flashbots:        true

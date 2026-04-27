@@ -7,6 +7,8 @@ from typing import Optional
 
 from src.strategy.signal import Signal, Direction
 from src.executor.recovery import CircuitBreaker, ReplayProtection
+from src.executor.tx_builder import TxBuilder
+from src.executor.unwind import UnwindResult, execute_unwind, plan_unwind
 
 
 class ExecutorState(Enum):
@@ -38,6 +40,11 @@ class ExecutionContext:
     leg2_fill_price: Optional[Decimal] = None
     leg2_fill_size: Optional[Decimal] = None
 
+    # Ready transactions, populated when a tx_builder is wired into the Executor.
+    prepared_leg1: Optional[object] = None       # PreparedCexOrder | PreparedDexTx
+    prepared_leg2: Optional[object] = None
+    unwind_result: Optional[UnwindResult] = None
+
     started_at: float = field(default_factory=time.time)  # Unix timestamp
     finished_at: Optional[float] = None                   # Unix timestamp
     actual_net_pnl: Optional[Decimal] = None
@@ -51,7 +58,9 @@ class ExecutorConfig:
     leg2_timeout: float = 60.0  # seconds — passed to asyncio.wait_for
     min_fill_ratio: Decimal = Decimal('0.8')
     use_flashbots: bool = True
-    simulation_mode: bool = True
+    simulation_mode: bool = True   # legacy flag — pure dummy fills, no builder calls
+    dry_run: bool = True           # when tx_builder is wired: build & sign, never broadcast
+    slippage_bps: Decimal = Decimal('30')
     gas_cost_usd: Decimal = Decimal('0.5')
 
 
@@ -59,11 +68,15 @@ class Executor:
     """Execute arbitrage trades across CEX and DEX."""
 
     def __init__(self, exchange_client, pricing_module, inventory_tracker,
-                 config: Optional[ExecutorConfig] = None):
+                 config: Optional[ExecutorConfig] = None,
+                 tx_builder: Optional[TxBuilder] = None,
+                 chain_id=None):
         self.exchange = exchange_client
         self.pricing = pricing_module
         self.inventory = inventory_tracker
         self.config = config or ExecutorConfig()
+        self.tx_builder = tx_builder
+        self.chain_id = chain_id
 
         self.circuit_breaker = CircuitBreaker()
         self.replay_protection = ReplayProtection()
@@ -147,6 +160,8 @@ class Executor:
 
         ctx.leg1_fill_price = leg1['price']
         ctx.leg1_fill_size = leg1['filled']
+        if 'prepared' in leg1:
+            ctx.prepared_leg1 = leg1['prepared']
         ctx.state = ExecutorState.LEG1_FILLED
 
         # Leg 2: DEX
@@ -174,6 +189,8 @@ class Executor:
 
         ctx.leg2_fill_price = leg2['price']
         ctx.leg2_fill_size = leg2['filled']
+        if 'prepared' in leg2:
+            ctx.prepared_leg2 = leg2['prepared']
         ctx.actual_net_pnl = self._calculate_pnl(ctx)
         if ctx.signal.expected_net_pnl:
             ctx.execution_quality = ctx.actual_net_pnl / ctx.signal.expected_net_pnl
@@ -207,6 +224,8 @@ class Executor:
 
         ctx.leg1_fill_price = leg1['price']
         ctx.leg1_fill_size = leg1['filled']
+        if 'prepared' in leg1:
+            ctx.prepared_leg1 = leg1['prepared']
         ctx.state = ExecutorState.LEG1_FILLED
 
         # Leg 2: CEX
@@ -234,6 +253,8 @@ class Executor:
 
         ctx.leg2_fill_price = leg2['price']
         ctx.leg2_fill_size = leg2['filled']
+        if 'prepared' in leg2:
+            ctx.prepared_leg2 = leg2['prepared']
         ctx.actual_net_pnl = self._calculate_pnl(ctx)
         if ctx.signal.expected_net_pnl:
             ctx.execution_quality = ctx.actual_net_pnl / ctx.signal.expected_net_pnl
@@ -242,6 +263,21 @@ class Executor:
 
     async def _execute_cex_leg(self, signal: Signal, size: Optional[Decimal] = None) -> dict:
         actual_size = size or signal.size
+
+        # Builder path: prepare a real order; in dry_run, never submit.
+        if self.tx_builder is not None:
+            prepared = self.tx_builder.build_cex_order(
+                signal, self.config.slippage_bps, size=actual_size, order_type='limit',
+            )
+            if self.config.dry_run:
+                logger = __import__('logging').getLogger(__name__)
+                logger.info("DRY-RUN CEX LEG: %s %s %s @ %s",
+                            prepared.side, prepared.amount, prepared.symbol, prepared.price)
+                return {'success': True, 'price': signal.cex_price, 'filled': actual_size,
+                        'prepared': prepared}
+            raise NotImplementedError("CEX broadcast disabled — set dry_run=True")
+
+        # Legacy paths (kept so existing tests with simulation_mode still work).
         if self.config.simulation_mode:
             await asyncio.sleep(0.1)
             return {'success': True, 'price': signal.cex_price * Decimal('1.0001'), 'filled': actual_size}
@@ -256,13 +292,56 @@ class Executor:
                 'error': result['status']}
 
     async def _execute_dex_leg(self, signal: Signal, size: Decimal) -> dict:
+        # Builder path: build & sign Uniswap V2 swap; in dry_run, never broadcast.
+        if self.tx_builder is not None:
+            from src.configs.tokens import get_token
+            base_sym, quote_sym = signal.pair.split('/')
+            token_base = get_token(self.chain_id, base_sym)
+            token_quote = get_token(self.chain_id, quote_sym)
+
+            if signal.direction == Direction.BUY_CEX_SELL_DEX:
+                token_in, token_out = token_base, token_quote
+            else:
+                token_in, token_out = token_quote, token_base
+
+            amount_in_wei = int(size * (10 ** token_in.decimals))
+            slippage_factor = Decimal('1') - self.config.slippage_bps / Decimal('10000')
+            amount_out_min_wei = int(
+                size * signal.dex_price * (10 ** token_out.decimals) * slippage_factor
+            )
+
+            prepared = self.tx_builder.build_dex_swap(
+                token_in, token_out, amount_in_wei, amount_out_min_wei,
+            )
+            if self.config.dry_run:
+                logger = __import__('logging').getLogger(__name__)
+                logger.info("DRY-RUN DEX LEG: tx_hash=%s gas=%s amountOutMin=%s",
+                            prepared.tx_hash, prepared.gas, prepared.amount_out_min)
+                return {'success': True, 'price': signal.dex_price, 'filled': size,
+                        'prepared': prepared}
+            raise NotImplementedError("DEX broadcast disabled — set dry_run=True")
+
+        # Legacy path.
         if self.config.simulation_mode:
             await asyncio.sleep(0.5)
             return {'success': True, 'price': signal.dex_price * Decimal('0.9998'), 'filled': size}
         raise NotImplementedError("Real DEX execution requires Week 2 integration")
 
     async def _unwind(self, ctx: ExecutionContext) -> bool:
-        """Market sell to flatten stuck position. Returns True if successful."""
+        """Flatten the stuck leg-1 position. See docs/unwind_strategy.md."""
+        # Builder path: real prepared transactions, no broadcast in dry_run.
+        if self.tx_builder is not None:
+            plan = plan_unwind(ctx)
+            if plan is None:
+                return True
+            result = await execute_unwind(
+                plan, self.tx_builder, self.exchange,
+                chain_id=self.chain_id, dry_run=self.config.dry_run,
+            )
+            ctx.unwind_result = result
+            return result.success
+
+        # Legacy stub for existing simulation tests.
         if self.config.simulation_mode:
             await asyncio.sleep(0.1)
             return True

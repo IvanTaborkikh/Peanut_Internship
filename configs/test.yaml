@@ -1,0 +1,51 @@
+# TEST mode: Binance testnet for CEX, real mainnet/Arbitrum RPC for DEX reads.
+# dry_run=true means we build & sign transactions but never broadcast them.
+mode: test
+dry_run: true
+
+cex:
+  exchange: binance
+  api_key:  "${BINANCE_TESTNET_API_KEY}"
+  secret:   "${BINANCE_TESTNET_SECRET}"
+  testnet:  true
+
+# Wallet is optional in test/dry_run, but Phase 4 will need it for signing.
+# Comment out the wallet block to run without signing capabilities.
+wallet:
+  private_key: "${PRIVATE_KEY}"
+
+chains:
+  - chain_id: 1
+    rpc_url: "${MAINNET_RPC_URL}"
+    ws_url:  "${WS_RPC_URL}"
+  - chain_id: 42161
+    rpc_url: "${RPC_URL}"
+
+pairs:
+  - pair: ETH/USDT
+    chain_id: 1
+    trade_size: "0.1"
+  - pair: ETH/USDC
+    chain_id: 42161
+    trade_size: "0.1"
+
+fees:
+  cex_taker_bps: "10"
+  cex_maker_bps: "2"
+  dex_swap_bps:  "30"
+  gas_cost_usd_default: "0.5"
+
+signal:
+  min_spread_bps:    "50"
+  min_profit_usd:    "0.5"
+  max_position_usd:  "1000"
+  signal_ttl_seconds: 5.0
+  cooldown_seconds:   2.0
+  min_score:         "60"
+
+executor:
+  leg1_timeout_seconds: 5.0
+  leg2_timeout_seconds: 60.0
+  min_fill_ratio:       "0.8"
+  slippage_bps:         "30"
+  use_flashbots:        false
