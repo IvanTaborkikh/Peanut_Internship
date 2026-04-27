@@ -614,6 +614,138 @@ Last 5 entries:
 
 ---
 
+## Week 4 — Strategy, Execution & Recovery
+
+### What was added
+
+| Module | Description |
+|--------|-------------|
+| `strategy/signal.py` | `Signal` dataclass + `Direction` enum, `is_valid()` with TTL/inventory/limit checks |
+| `strategy/fees.py` | `FeeStructure` — breakeven spread and net-profit calculation |
+| `strategy/scorer.py` | `SignalScorer` — weighted score (spread/liquidity/inventory/history) + time decay |
+| `strategy/generator.py` | `SignalGenerator` — fetches CEX OB + DEX quote, computes spreads both directions, validates inventory and position limits |
+| `executor/engine.py` | `Executor` finite state machine — CEX-first / DEX-first leg ordering, timeouts, partial-fill handling |
+| `executor/recovery.py` | `CircuitBreaker` (N failures / window / cooldown) + `ReplayProtection` (no double-execute) |
+| `executor/tx_builder.py` | Builds & signs Uniswap V2 swap txs, validates CEX orders against live market metadata |
+| `executor/unwind.py` | Plans + builds the flatten-trade when leg-2 fails — see [docs/unwind_strategy.md](docs/unwind_strategy.md) |
+| `notifications/telegram_notifier.py` | Telegram bot — execution results, circuit-breaker state, manual-action alerts |
+| `configs/schema.py` | Pydantic `BotConfig` (Mode, dry_run, chains, pairs, fees, signal, executor) |
+| `configs/tokens.py` | Per-chain token registry (ETH mainnet + Arbitrum) + Uniswap V2 router/factory addresses |
+| `configs/loader.py` | YAML loader with `${ENV_VAR}` expansion |
+
+### Modes & dry-run
+
+The bot has two modes, defined in YAML configs:
+
+| File | Mode | CEX endpoint | DEX RPC |
+|---|---|---|---|
+| `configs/test.yaml` | `test` | Binance **testnet** | Ethereum mainnet + Arbitrum (real liquidity) |
+| `configs/prod.yaml` | `prod` | Binance **mainnet** | Ethereum mainnet + Arbitrum |
+
+`dry_run: true` is the default in both files. With `dry_run` enabled the executor still **builds and signs** the exact transactions it would send — but never broadcasts. You see what *would* happen without taking position risk.
+
+```yaml
+# configs/test.yaml — abridged
+mode: test
+dry_run: true
+
+cex:
+  exchange: binance
+  api_key:  "${BINANCE_TESTNET_API_KEY}"
+  secret:   "${BINANCE_TESTNET_SECRET}"
+  testnet:  true
+
+wallet:
+  private_key: "${PRIVATE_KEY}"
+
+chains:
+  - chain_id: 1       # Ethereum mainnet — read-only DEX quotes
+    rpc_url: "${MAINNET_RPC_URL}"
+  - chain_id: 42161   # Arbitrum
+    rpc_url: "${RPC_URL}"
+
+pairs:
+  - { pair: ETH/USDT, chain_id: 1,     trade_size: "0.1" }
+  - { pair: ETH/USDC, chain_id: 42161, trade_size: "0.1" }
+```
+
+Load it:
+
+```python
+from src.configs.loader import load_config
+cfg = load_config('configs/test.yaml')
+print(cfg.mode, cfg.dry_run, len(cfg.pairs))
+```
+
+### Signal → Execution flow
+
+```
+PriceTickEvent
+   │
+   ▼
+SignalGenerator.generate(pair, size)
+   ├─ fetch CEX order book (real testnet/prod)
+   ├─ fetch DEX quote via PricingEngine (real mainnet/Arbitrum pool)
+   ├─ compute spreads both directions
+   ├─ apply min_spread_bps + min_profit_usd thresholds
+   ├─ inventory check (can_execute on both venues)
+   └─ build Signal with TTL + score
+   │
+   ▼
+SignalScorer.score(signal)   →   filtered by min_score
+   │
+   ▼
+Executor.execute(signal)
+   ├─ circuit_breaker / replay_protection (pre-flight)
+   ├─ leg-1 (CEX or DEX, depending on use_flashbots)
+   │      └─ TxBuilder.build_dex_swap | build_cex_order
+   ├─ leg-2 (the other venue)
+   └─ on failure → plan_unwind → execute_unwind → MARKET order/swap
+```
+
+### Ready transactions
+
+In `dry_run` with `tx_builder` wired:
+- DEX leg → `PreparedDexTx`: full EIP-1559 tx, signed via `eth_account`. Has `raw_tx`, `tx_hash`, `gas`, `amount_out_min`, `deadline`. Broadcasting is one `web3.eth.send_raw_transaction(prepared.raw_tx)` call away.
+- CEX leg → `PreparedCexOrder`: validated against `exchange.markets[pair]` (min amount, min notional). Submitting is one `exchange.create_order(**asdict(prepared))` call away.
+
+Logs from a dry-run tick:
+```
+INFO  signal: ETH/USDT spread=82bps score=78
+INFO  DRY-RUN CEX LEG: buy 0.1 ETH/USDT @ 2007.6
+INFO  DRY-RUN DEX LEG: tx_hash=0x9a4f… gas=187521 amountOutMin=199854231
+INFO  SUCCESS: PnL=$1.84
+```
+
+### Unwind
+
+When leg-2 fails (timeout, revert, low fill), the executor flattens leg-1 immediately. Strategy: market order on the same venue, opposite side. Full rationale in **[docs/unwind_strategy.md](docs/unwind_strategy.md)**.
+
+```python
+from src.executor.unwind import plan_unwind, execute_unwind, UnwindStrategy
+plan = plan_unwind(ctx)        # → UnwindPlan(venue, side, size, MARKET)
+result = await execute_unwind(plan, tx_builder, exchange, chain_id, dry_run=True)
+# result.prepared_order or result.prepared_tx — never broadcast in dry_run
+```
+
+If unwind itself fails → `ExecutorState.UNWIND_FAILED` and Telegram alert (operator must flatten manually).
+
+### Tests
+
+- `test_signal.py` — Signal validity, generator pipeline, cooldown, position limits
+- `test_scorer.py` — weighted scoring, history decay
+- `test_executor.py` — FSM transitions, both leg orderings, timeouts, partial fills, circuit breaker, replay
+- `test_recovery.py` — CB threshold/window/cooldown, replay TTL
+- `test_tx_builder_unwind.py` — signed DEX tx with mock web3, CEX order validation, unwind planning + dry-run building
+- `test_config.py` — YAML loading, env expansion, pydantic validation
+
+```bash
+make test                          # full suite
+pytest tests/test_executor.py -q   # week-4 executor only
+```
+
+---
+
 ## Make Commands
 
 Run `make help` to see all available commands.
@@ -629,25 +761,28 @@ Run `make help` to see all available commands.
 
 | Command | Description            |
 |---------|------------------------|
-| `make test` | Run all 396 unit tests |
-| `make lint` | Check code with ruff   |
-| `make lint-fix` | Auto-fix lint errors   |
-| `make format` | Auto-format code       |
-| `make clean` | Remove cache files     |
+| `make run` | Run `src/main.py` entry point |
+| `make test` | Run the full unit-test suite (490 tests) |
+| `make lint` | Check code with ruff |
+| `make lint-fix` | Auto-fix lint errors |
+| `make format` | Auto-format code |
+| `make clean` | Remove cache files |
 
 **Blockchain**
 
 | Command | Description |
 |---------|-------------|
-| `make analyze TX=0x...` | Analyze a transaction |
-| `make integration-test` | End-to-end test on Sepolia |
+| `make analyze TX=0x...` | Analyze a transaction (uses `RPC_URL` from `.env`) |
+| `make analyze TX=0x... RPC=https://...` | Analyze with a specific RPC endpoint |
+| `make integration-test` | End-to-end test on Sepolia (default 0.000001 ETH) |
+| `make integration-test AMOUNT=0.00005 TO=0x...` | Custom amount and/or destination |
 
 **Exchange / Inventory (Week 3)**
 
 | Command | Description |
 |---------|-------------|
 | `make smoke-exchange` | Fetch order book, balance and fees from Binance testnet |
-| `make smoke-orderbook` | Formatted order book report `[PAIR=ETH/USDT DEPTH=20]` |
+| `make smoke-orderbook` | Formatted order book report `[PAIR=ETH/USDT DEPTH=20 SMALL=2 LARGE=10]` |
 | `make smoke-tracker` | Inventory snapshot + skew analysis |
 | `make arb-check` | Arb opportunity check `[PAIR=ETH/USDT SIZE=1]` |
 | `make smoke-multi` | Multi-exchange arb: Bybit vs Binance `[PAIR=ETH/USDT SIZE=1]` |
@@ -657,12 +792,21 @@ Run `make help` to see all available commands.
 | `make pnl-summary` | PnL summary (simulated trades) |
 | `make pnl-recent` | Last N trades `[N=5]` |
 
+**Bot (Week 4)**
+
+| Command | Description |
+|---------|-------------|
+| `make smoke` | Quick end-to-end smoke test (no keys needed, 5 ticks) |
+| `make e2e` | Full e2e — 8 scenarios (replay, CB, partial fill, etc.) |
+| `make bot` | Run arb bot in simulation mode (Ctrl+C to stop) `[PAIR=ETH/USDT]` |
+| `make sim` | Realistic market simulation `[TICKS=200 SEED=42 VERBOSE=1]` |
+
 **Pricing**
 
 | Command | Description |
 |---------|-------------|
 | `make pricing-demo` | Run pricing module demo (no network needed) |
-| `make impact-analyzer` | Show price impact table |
+| `make impact-analyzer` | Show price impact table `[TOKEN_IN=USDC SIZES=1000,10000]` |
 | `make fork` | Start Anvil mainnet fork on port 8545 |
 | `make stop-fork` | Stop running Anvil process |
 | `make test-fork` | Verify AMM math against fork (needs Anvil running) |
@@ -692,6 +836,17 @@ Run `make help` to see all available commands.
 ---
 
 ## Changelog
+
+### Week 4 — Strategy, Execution & Recovery
+- `strategy/`: `Signal`, `FeeStructure`, `SignalScorer` (weighted: spread/liquidity/inventory/history), `SignalGenerator` with TTL + cooldown
+- `executor/engine.py`: FSM `ExecutorState` with both `_execute_cex_first` and `_execute_dex_first`, asyncio timeouts, partial-fill threshold + unwind, `execution_quality = actual/expected`
+- `executor/recovery.py`: `CircuitBreaker` and `ReplayProtection` with TTL cleanup
+- `executor/tx_builder.py`: builds & signs Uniswap V2 swap txs (EIP-1559), validates CEX orders against live `exchange.markets` metadata
+- `executor/unwind.py`: `plan_unwind` + `execute_unwind` — market-order strategy on same venue, dry-run produces full prepared tx without broadcasting
+- `notifications/telegram_notifier.py`: execution + circuit-breaker + manual-action alerts
+- `configs/`: pydantic schema, per-chain token registry (ETH mainnet + Arbitrum), YAML configs with `${VAR}` expansion, separate `test.yaml` / `prod.yaml`
+- `docs/unwind_strategy.md`: design doc for unwind decision tree
+- 490 unit tests passing
 
 ### Week 3 — Exchange, Inventory & Arb Detection
 - `exchange/client.py`: ExchangeClient with rolling-window rate limiter, dynamic limit loading from `/exchangeInfo`, server-side weight sync via `X-MBX-USED-WEIGHT-1M` header
