@@ -116,24 +116,42 @@ class RouteFinder:
         """
         Convert gas cost to output token units.
 
-        Gas is always paid in ETH (wei). To compare with gross output
-        (which is in output token units), we convert using spot price
-        from a pool that connects token_in → token_out.
-
-        If no direct pool is found, returns gas cost in wei as-is
-        (best-effort fallback).
+        Gas is always paid in ETH (wei). Three cases:
+          1) Output IS ETH/WETH — gas_cost is already in output units, return as-is.
+          2) Input IS ETH/WETH and a direct pool exists — `gas_cost_wei / spot`
+             converts ETH wei → output wei via the pool's reserve ratio
+             (spot = reserve_in / reserve_out = ETH_wei per output_wei).
+          3) Neither side is ETH or no pool — best-effort fallback: return
+             gas_cost_wei (under-corrects when output ≠ ETH, but errs safe).
         """
         gas_cost_wei = self._get_gas_estimate(route) * gas_price_gwei * 10**9
         token_in = route.path[0]
         token_out = route.path[-1]
 
-        spot = self._find_spot(token_in, token_out)
-        if spot is None or spot == 0:
+        eth_like = {'ETH', 'WETH'}
+        if token_out.symbol.upper() in eth_like:
             return gas_cost_wei
 
-        # spot = reserve_in / reserve_out (raw units)
-        # gas_cost_in_output = gas_cost_wei / spot
-        return int(Decimal(gas_cost_wei) / spot)
+        # Direct ETH leg: spot is reserve_ETH / reserve_out, so dividing
+        # ETH-wei gas cost by spot yields output-wei.
+        if token_in.symbol.upper() in eth_like:
+            spot = self._find_spot(token_in, token_out)
+            if spot is None or spot == 0:
+                return gas_cost_wei
+            return int(Decimal(gas_cost_wei) / spot)
+
+        # Multi-hop with ETH pivot (e.g. WBTC→WETH→USDT). Use the WETH↔output
+        # pool's spot to convert ETH-wei gas cost to output-wei.
+        weth_pivot = next(
+            (t for t in route.path if t.symbol.upper() in eth_like),
+            None,
+        )
+        if weth_pivot is not None and weth_pivot != token_out:
+            spot = self._find_spot(weth_pivot, token_out)
+            if spot is not None and spot != 0:
+                return int(Decimal(gas_cost_wei) / spot)
+
+        return gas_cost_wei
 
     def _find_spot(self, token_in: Token, token_out: Token) -> Optional[Decimal]:
         """

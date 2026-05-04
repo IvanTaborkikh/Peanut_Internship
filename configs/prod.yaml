@@ -17,13 +17,14 @@ chains:
   - chain_id: 1
     rpc_url: "${MAINNET_RPC_URL}"
     ws_url:  "${WS_RPC_URL}"
-  - chain_id: 42161
-    rpc_url: "${RPC_URL}"
 
+# Mainnet Uniswap V2 pools — pool_address is required for PricingEngine.load_pools().
+# Day-1 trade_size keeps total trade value under max_trade_usd=$5.
 pairs:
   - pair: ETH/USDT
     chain_id: 1
-    trade_size: "0.1"
+    pool_address: "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852"
+    trade_size: "0.002"
 
 fees:
   cex_taker_bps: "10"
@@ -45,3 +46,20 @@ executor:
   min_fill_ratio:       "0.8"
   slippage_bps:         "30"
   use_flashbots:        true
+
+# Risk limits — Day-1 conservative settings per docs/strategy_review.md.
+# Ramp-up plan (instructor sign-off required between days):
+#   Day 1:   max_trade_usd=5,  max_daily_loss=10
+#   Day 2-3: max_trade_usd=10, max_daily_loss=15
+#   Day 4-5: max_trade_usd=20, max_daily_loss=20  (= ABSOLUTE limits)
+risk:
+  initial_capital_usd:    "100"
+  max_trade_usd:          "5"
+  max_trade_pct:          "0.05"
+  max_position_per_token: "20"
+  max_open_positions:     1
+  max_loss_per_trade:     "3"
+  max_daily_loss:         "10"
+  max_drawdown_pct:       "0.15"
+  max_trades_per_hour:    10
+  consecutive_loss_limit: 2

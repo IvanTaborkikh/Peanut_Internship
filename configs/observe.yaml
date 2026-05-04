@@ -1,0 +1,73 @@
+# OBSERVE mode: full mainnet (real Binance + real Uniswap V2 mainnet),
+# but trade_size is large enough that gas cost is a small % of output —
+# so SPREAD lines show real cross-venue divergence, not gas-domination.
+#
+# dry_run=true and the executor's hardcoded simulation_mode prevent any real
+# broadcast. Use this to study how the bot reacts when arb opportunities
+# actually appear (occasional positive spreads during volatility).
+#
+# Run:  make dry-run CONFIG=configs/observe.yaml
+mode: prod
+dry_run: true
+
+cex:
+  exchange: binance
+  api_key:  "${BINANCE_API_KEY}"
+  secret:   "${BINANCE_SECRET}"
+  testnet:  false
+
+wallet:
+  private_key: "${PRIVATE_KEY}"
+
+chains:
+  - chain_id: 1
+    rpc_url: "${MAINNET_RPC_URL}"
+    ws_url:  "${WS_RPC_URL}"
+
+# Larger trades so gas (~$0.35 per swap at 1 gwei) is a small % of output.
+# 0.05 ETH ≈ $115 trade — gas is ~0.3% of output, not 8%.
+pairs:
+  - pair: ETH/USDT
+    chain_id: 1
+    pool_address: "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852"
+    trade_size: "0.05"
+  - pair: ETH/USDC
+    chain_id: 1
+    pool_address: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
+    trade_size: "0.05"
+
+fees:
+  cex_taker_bps: "10"
+  cex_maker_bps: "2"
+  dex_swap_bps:  "30"
+  gas_cost_usd_default: "5.0"
+
+# Permissive thresholds — surface every potential signal so we can see the
+# pipeline GENERATED → REJECTED_*/EXECUTED in logs, not just silence.
+signal:
+  min_spread_bps:    "10"
+  min_profit_usd:    "0.1"
+  max_position_usd:  "5000"
+  signal_ttl_seconds: 5.0
+  cooldown_seconds:   2.0
+  min_score:         "30"
+
+executor:
+  leg1_timeout_seconds: 5.0
+  leg2_timeout_seconds: 60.0
+  min_fill_ratio:       "0.8"
+  slippage_bps:         "30"
+  use_flashbots:        false
+
+# Larger ABSOLUTE-fitting limits so trades aren't risk-rejected on size.
+risk:
+  initial_capital_usd:    "500"
+  max_trade_usd:          "25"
+  max_trade_pct:          "0.30"
+  max_position_per_token: "30"
+  max_open_positions:     1
+  max_loss_per_trade:     "5"
+  max_daily_loss:         "20"
+  max_drawdown_pct:       "0.20"
+  max_trades_per_hour:    30
+  consecutive_loss_limit: 5

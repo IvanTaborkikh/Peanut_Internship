@@ -1,0 +1,76 @@
+# CHIP arb observation: Binance CHIP/USDT (mainnet) ↔ Uniswap V3 CHIP/USDC (Arbitrum).
+#
+# CEX side is denominated in USDT, DEX side in USDC. dex_quote_override + the
+# StablecoinConverter pull the live USDC/USDT rate from Binance so the spread
+# isn't polluted by a 5-10 bps stablecoin drift.
+#
+# dry_run=true and the executor's hardcoded simulation_mode prevent any real
+# broadcast. Run: make dry-run-chip
+mode: prod
+dry_run: true
+
+cex:
+  exchange: binance
+  api_key:  "${BINANCE_API_KEY}"
+  secret:   "${BINANCE_SECRET}"
+  testnet:  false
+
+wallet:
+  private_key: "${PRIVATE_KEY}"
+
+chains:
+  - chain_id: 42161
+    rpc_url: "${ARBITRUM_RPC_URL}"
+    ws_url:  "${WS_RPC_URL}"
+
+dex:
+  version:  v3
+  fee_tier: 100        # 0.01% — most liquid V3 pool for CHIP/USDC
+
+# CEX pair quote is USDT, but Uniswap V3 CHIP pool is paired with USDC.
+dex_quote_override: {}
+
+
+stablecoin_converter: false
+
+# Single CHIP pair. trade_size=250 ≈ $15 at $0.06/CHIP.
+# pool_address is unused for V3 (Quoter routes internally) but kept as
+# empty string for schema consistency.
+pairs:
+  - pair: CHIP/USDC
+    chain_id: 42161
+    pool_address: ""
+    trade_size: "250"
+
+fees:
+  cex_taker_bps: "10"
+  cex_maker_bps: "2"
+  dex_swap_bps:  "1"      # 0.01% V3 fee
+  gas_cost_usd_default: "0.5"
+
+signal:
+  min_spread_bps:    "30"
+  min_profit_usd:    "0.05"
+  max_position_usd:  "100"
+  signal_ttl_seconds: 5.0
+  cooldown_seconds:   3.0
+  min_score:         "30"
+
+executor:
+  leg1_timeout_seconds: 5.0
+  leg2_timeout_seconds: 60.0
+  min_fill_ratio:       "0.8"
+  slippage_bps:         "50"
+  use_flashbots:        false
+
+risk:
+  initial_capital_usd:    "100"
+  max_trade_usd:          "15"
+  max_trade_pct:          "0.20"
+  max_position_per_token: "30"
+  max_open_positions:     1
+  max_loss_per_trade:     "5"
+  max_daily_loss:         "15"
+  max_drawdown_pct:       "0.20"
+  max_trades_per_hour:    20
+  consecutive_loss_limit: 3

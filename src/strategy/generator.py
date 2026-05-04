@@ -3,33 +3,36 @@ import time
 from decimal import Decimal
 from typing import Optional
 
-from src.core.types import Address, Token
+from src.configs.schema import ChainId
+from src.configs.tokens import get_token
 from src.strategy.signal import Signal, Direction
 from src.strategy.fees import FeeStructure
 from src.inventory.tracker import Venue
 
-_ARBITRUM_TOKENS: dict[str, Token] = {
-    'ETH':  Token(Address('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'), 'WETH', 18),
-    'WETH': Token(Address('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'), 'WETH', 18),
-    'USDT': Token(Address('0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'), 'USDT', 6),
-    'USDC': Token(Address('0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8'), 'USDC', 6),
-    'WBTC': Token(Address('0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f'), 'WBTC', 8),
-}
-
 
 class SignalGenerator:
     def __init__(self, exchange_client, pricing_module, inventory_tracker,
-                 fee_structure: FeeStructure, config: dict):
+                 fee_structure: FeeStructure, config: dict,
+                 chain_id: ChainId = ChainId.ARBITRUM,
+                 dex_quote_override: Optional[dict] = None,
+                 stablecoin_converter=None):
         self.exchange = exchange_client
         self.pricing = pricing_module
         self.inventory = inventory_tracker
         self.fees = fee_structure
+        self.chain_id = chain_id
 
         self.min_spread_bps = Decimal(str(config.get('min_spread_bps', 50)))
         self.min_profit_usd = Decimal(str(config.get('min_profit_usd', 5.0)))
         self.max_position_usd = Decimal(str(config.get('max_position_usd', 10_000)))
         self.signal_ttl = config.get('signal_ttl_seconds', 5)
         self.cooldown = config.get('cooldown_seconds', 2)
+
+        # Cross-stablecoin handling: when CEX pair quote (e.g. USDT) differs from
+        # DEX-side pool quote (e.g. USDC), translate the symbol via override AND
+        # convert prices via the live ratio (StablecoinConverter).
+        self.dex_quote_override: dict = dex_quote_override or {}
+        self.stablecoin_converter = stablecoin_converter
 
         self.last_signal_time: dict[str, float] = {}
 
@@ -48,6 +51,15 @@ class SignalGenerator:
         # Calculate spreads both directions
         spread_a = (prices['dex_sell'] - prices['cex_ask']) / prices['cex_ask'] * 10_000
         spread_b = (prices['cex_bid'] - prices['dex_buy']) / prices['dex_buy'] * 10_000
+
+        logging.info(
+            "SPREAD | pair=%s | cex=%.6g/%.6g | dex_sell=%.6g dex_buy=%.6g | "
+            "spread_a=%.1fbps spread_b=%.1fbps | min=%.1fbps",
+            pair,
+            float(prices['cex_bid']), float(prices['cex_ask']),
+            float(prices['dex_sell']), float(prices['dex_buy']),
+            float(spread_a), float(spread_b), float(self.min_spread_bps),
+        )
 
         # Pick better direction
         if spread_a > spread_b and spread_a >= self.min_spread_bps:
@@ -114,6 +126,26 @@ class SignalGenerator:
                 buy_quote = self.pricing.get_quote(token_out, token_in, usdt_in, gas_price)
                 base_out = Decimal(buy_quote.expected_output) / Decimal(10**token_in.decimals)
                 dex_buy = Decimal(usdt_in) / Decimal(10**token_out.decimals) / base_out if base_out else mid
+
+                # Cross-stablecoin conversion: when CEX quote symbol differs from
+                # DEX-side symbol (e.g. CEX=USDT, DEX=USDC), translate dex_sell/buy
+                # into CEX-quote units using the live exchange rate.
+                _, cex_quote_sym = pair.split('/')
+                dex_quote_sym = self.dex_quote_override.get(cex_quote_sym, cex_quote_sym)
+                if dex_quote_sym != cex_quote_sym and self.stablecoin_converter is not None:
+                    try:
+                        ratio = self.stablecoin_converter.current_ratio()  # USDC value in USDT
+                    except Exception as e:
+                        logging.warning("stablecoin ratio fetch failed: %s — using 1:1", e)
+                        ratio = Decimal('1')
+                    if (cex_quote_sym, dex_quote_sym) == ('USDT', 'USDC'):
+                        # DEX prices are in USDC; convert to USDT (multiply by ratio).
+                        dex_sell = dex_sell * ratio
+                        dex_buy = dex_buy * ratio
+                    elif (cex_quote_sym, dex_quote_sym) == ('USDC', 'USDT'):
+                        if ratio != 0:
+                            dex_sell = dex_sell / ratio
+                            dex_buy = dex_buy / ratio
             else:
                 # STUB: Simulated DEX prices for testing without Week 2
                 mid = (cex_bid + cex_ask) / 2
@@ -124,17 +156,16 @@ class SignalGenerator:
                 'cex_bid': cex_bid, 'cex_ask': cex_ask,
                 'dex_buy': dex_buy, 'dex_sell': dex_sell,
             }
-        except Exception:
-            logging.debug("_fetch_prices failed for %s", pair, exc_info=True)
+        except Exception as e:
+            logging.warning("_fetch_prices failed for %s: %s", pair, e, exc_info=True)
             return None
 
     def _pair_to_tokens(self, pair: str) -> tuple:
         base, quote = pair.split('/')
-        token_in = _ARBITRUM_TOKENS.get(base)
-        token_out = _ARBITRUM_TOKENS.get(quote)
-        if token_in is None or token_out is None:
-            raise ValueError(f"Unsupported token in pair: {pair}")
-        return token_in, token_out
+        # When the CEX pair quote (e.g. USDT) doesn't have a DEX pool but a
+        # cousin stablecoin does (e.g. USDC), look up the substitute symbol.
+        quote = self.dex_quote_override.get(quote, quote)
+        return get_token(self.chain_id, base), get_token(self.chain_id, quote)
 
     def _check_inventory(self, pair, direction, size, price) -> bool:
         base, quote = pair.split('/')
