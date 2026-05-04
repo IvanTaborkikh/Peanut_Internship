@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 from decimal import Decimal
 
 from aiogram import Bot, Dispatcher, Router
@@ -24,6 +26,17 @@ class TelegramNotifier:
         self.router.message.register(self._cmd_winrate,   Command("winrate"))
         self.router.message.register(self._cmd_pause,     Command("pause"))
         self.router.message.register(self._cmd_resume,    Command("resume"))
+        # Control plane added in Week 5 hardening.
+        self.router.message.register(self._cmd_limits,                Command("limits"))
+        self.router.message.register(self._cmd_set_max_trade,         Command("set_max_trade"))
+        self.router.message.register(self._cmd_set_max_daily_loss,    Command("set_max_daily_loss"))
+        self.router.message.register(self._cmd_set_consecutive_limit, Command("set_consecutive_limit"))
+        self.router.message.register(self._cmd_metrics,               Command("metrics"))
+        self.router.message.register(self._cmd_errors,                Command("errors"))
+        self.router.message.register(self._cmd_enable_real_trading,   Command("enable_real_trading"))
+        self.router.message.register(self._cmd_confirm_real_trading,  Command("confirm_real_trading"))
+        self.router.message.register(self._cmd_key_status,            Command("key_status"))
+        self.router.message.register(self._cmd_shutdown,              Command("shutdown"))
 
         self.dp = Dispatcher()
         self.dp.include_router(self.router)
@@ -71,13 +84,25 @@ class TelegramNotifier:
     async def _cmd_start(self, message: Message):
         await message.answer(
             "Arb bot connected.\n\n"
+            "Read-only:\n"
             "/status    — bot state\n"
             "/pnl       — PnL summary\n"
             "/inventory — balances\n"
             "/signals   — last 5 signals\n"
             "/winrate   — win rate stats\n"
-            "/pause     — pause trading\n"
-            "/resume    — resume trading"
+            "/limits    — current risk limits\n"
+            "/metrics   — pipeline counters\n"
+            "/errors    — recent errors by type\n"
+            "/key_status — Binance API key validity & expiration\n\n"
+            "Control:\n"
+            "/pause [min]              — pause N min (no arg = until /resume)\n"
+            "/resume                   — resume now\n"
+            "/set_max_trade <usd>      — update limit\n"
+            "/set_max_daily_loss <usd> — update limit\n"
+            "/set_consecutive_limit <n>— update limit\n"
+            "/enable_real_trading      — start DRY→REAL flip\n"
+            "/confirm_real_trading     — confirm within 60s\n"
+            "/shutdown                 — fully terminate the bot"
         )
 
     async def _cmd_status(self, message: Message):
@@ -181,15 +206,173 @@ class TelegramNotifier:
         if self._arb_bot is None:
             await message.answer("Bot reference not set.")
             return
-        self._arb_bot.paused = True
-        await message.answer("Bot paused. Send /resume to continue.")
+        arg = _arg_after_command(message.text)
+        if arg:
+            try:
+                minutes = int(arg)
+                if minutes <= 0:
+                    raise ValueError
+            except ValueError:
+                await message.answer("Usage: /pause <minutes>  (positive int) or /pause")
+                return
+            self._arb_bot.pause_manager.pause(minutes, "manual via Telegram")
+            await message.answer(f"⏸️ Trading paused {minutes}min.")
+        else:
+            self._arb_bot.paused = True
+            await message.answer("Bot paused (indefinite). Send /resume to continue.")
 
     async def _cmd_resume(self, message: Message):
         if self._arb_bot is None:
             await message.answer("Bot reference not set.")
             return
         self._arb_bot.paused = False
-        await message.answer("Bot resumed.")
+        self._arb_bot.pause_manager.cancel()
+        await message.answer("✅ Trading resumed.")
+
+    # ── Control plane (limits, metrics, real-trading flip) ────────────────────
+
+    async def _cmd_limits(self, message: Message):
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        lim = self._arb_bot.risk_manager.limits
+        await message.answer(
+            "📋 Risk limits:\n"
+            f"max_trade_usd:          ${lim.max_trade_usd}\n"
+            f"max_trade_pct:          {float(lim.max_trade_pct)*100:.0f}%\n"
+            f"max_loss_per_trade:     ${lim.max_loss_per_trade}\n"
+            f"max_daily_loss:         ${lim.max_daily_loss}\n"
+            f"max_drawdown_pct:       {float(lim.max_drawdown_pct)*100:.0f}%\n"
+            f"max_trades_per_hour:    {lim.max_trades_per_hour}\n"
+            f"consecutive_loss_limit: {lim.consecutive_loss_limit}"
+        )
+
+    async def _cmd_set_max_trade(self, message: Message):
+        await self._update_limit(message, 'max_trade_usd')
+
+    async def _cmd_set_max_daily_loss(self, message: Message):
+        await self._update_limit(message, 'max_daily_loss')
+
+    async def _cmd_set_consecutive_limit(self, message: Message):
+        await self._update_limit(message, 'consecutive_loss_limit')
+
+    async def _update_limit(self, message: Message, name: str):
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        arg = _arg_after_command(message.text)
+        if not arg:
+            await message.answer(f"Usage: /set_{name.replace('_usd','')} <value>")
+            return
+        ok, msg = self._arb_bot.risk_manager.update_limit(name, arg)
+        await message.answer(("✅ " if ok else "❌ ") + msg)
+
+    async def _cmd_metrics(self, message: Message):
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        m = self._arb_bot.metrics
+        await message.answer(
+            "📈 Metrics (session):\n"
+            f"signals_generated:        {m.signals_generated}\n"
+            f"signals_passed_score:     {m.signals_passed_score}\n"
+            f"signals_passed_validator: {m.signals_passed_validator}\n"
+            f"signals_passed_risk:      {m.signals_passed_risk}\n"
+            f"trades_executed:          {m.trades_executed}\n"
+            f"trades_successful:        {m.trades_successful}\n"
+            f"trades_failed:            {m.trades_failed}\n"
+            f"execution_rate:           {m.execution_rate:.1f}%"
+        )
+
+    async def _cmd_errors(self, message: Message):
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        summary = self._arb_bot.error_tracker.summary()
+        if not summary:
+            await message.answer("✅ No errors in last hour.")
+            return
+        lines = [f"{k}: {v}" for k, v in sorted(summary.items())]
+        await message.answer("❌ Errors (last hour):\n" + "\n".join(lines))
+
+    async def _cmd_enable_real_trading(self, message: Message):
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        if not self._arb_bot.dry_run:
+            await message.answer("✅ Already in REAL TRADING mode.")
+            return
+        self._arb_bot._real_trading_pending_at = time.time()
+        ttl = int(self._arb_bot._real_trading_pending_ttl)
+        await message.answer(
+            f"❓ Switch to REAL MONEY mode? Confirm within {ttl}s with:\n"
+            "/confirm_real_trading"
+        )
+
+    async def _cmd_confirm_real_trading(self, message: Message):
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        bot = self._arb_bot
+        pending = bot._real_trading_pending_at
+        if pending is None:
+            await message.answer(
+                "❌ No pending switch. Send /enable_real_trading first."
+            )
+            return
+        if time.time() - pending > bot._real_trading_pending_ttl:
+            bot._real_trading_pending_at = None
+            await message.answer("❌ Confirmation expired. Resend /enable_real_trading.")
+            return
+
+        bot.dry_run = False
+        # Both layers must flip — executor enforces its own dry-run gate.
+        try:
+            bot.executor.config.simulation_mode = False
+        except AttributeError:
+            pass
+        try:
+            if hasattr(bot.executor.config, 'dry_run'):
+                bot.executor.config.dry_run = False
+        except AttributeError:
+            pass
+        bot._real_trading_pending_at = None
+        logging.critical("🚨 REAL TRADING ENABLED 🚨 — DRY_RUN flipped via Telegram")
+        await message.answer(
+            "🚨 REAL TRADING ENABLED 🚨\n"
+            "Bot will now execute real trades."
+        )
+
+    async def _cmd_shutdown(self, message: Message):
+        """Fully terminate the bot. Sends SIGTERM to the current process so the
+        signal handler in ArbBot.run() cancels every task (trading loop,
+        polling, heartbeat) and the finally-block runs cleanly."""
+        if self._arb_bot is None:
+            await message.answer("Bot reference not set.")
+            return
+        await message.answer("🛑 Shutting down — bot will exit in a moment.")
+        self._arb_bot.running = False
+        import os
+        import signal as _signal
+        os.kill(os.getpid(), _signal.SIGTERM)
+
+    async def _cmd_key_status(self, message: Message):
+        if self._arb_bot is None or not getattr(self._arb_bot, '_key_health', None):
+            await message.answer("Key health check not initialized.")
+            return
+        status = await asyncio.to_thread(self._arb_bot._key_health.check)
+        if not status.valid:
+            await message.answer(f"❌ Invalid: {status.error_msg}")
+            return
+        if status.expires_at:
+            await message.answer(
+                f"✅ Valid\nExpires: {status.expires_at.isoformat(timespec='minutes')}\n"
+                f"Days remaining: {status.days_remaining:.1f}"
+            )
+        elif status.ip_restricted:
+            await message.answer("✅ Valid (IP-whitelisted, no expiration)")
+        else:
+            await message.answer("✅ Valid (expiration unknown)")
 
     # ── Polling loop ──────────────────────────────────────────────────────────
 
@@ -206,3 +389,15 @@ class TelegramNotifier:
             await self.bot.send_message(self.chat_id, text)
         except Exception as e:
             logging.warning(f"Telegram send failed: {e}")
+
+    async def send_text(self, text: str):
+        """Public outbound helper (used by ArbBot for ad-hoc alerts)."""
+        await self._send(text)
+
+
+def _arg_after_command(text: str | None) -> str:
+    """Extract the argument substring after `/cmd `. Empty string if none."""
+    if not text:
+        return ""
+    parts = text.strip().split(maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""

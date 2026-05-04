@@ -12,8 +12,15 @@ from src.configs.schema import (
     FeesConfig,
     Mode,
     PairConfig,
+    RiskLimitsConfig,
     WalletConfig,
 )
+from src.safety.killswitch import (
+    ABSOLUTE_MAX_DAILY_LOSS,
+    ABSOLUTE_MAX_TRADE_USD,
+    ABSOLUTE_MIN_CAPITAL,
+)
+from src.safety.limits import RiskLimits as RuntimeRiskLimits
 from src.configs.tokens import TOKENS, get_factory, get_router, get_token
 
 
@@ -65,17 +72,18 @@ def test_load_test_yaml():
     assert cfg.mode == Mode.TEST
     assert cfg.dry_run is True
     assert cfg.cex.testnet is True
-    assert cfg.cex.api_key == 'test_key' # pragma: allowlist secret
-    assert len(cfg.chains) == 2
-    assert {c.chain_id for c in cfg.chains} == {ChainId.ETH_MAINNET, ChainId.ARBITRUM}
+    assert cfg.cex.api_key.get_secret_value() == 'test_key'  # pragma: allowlist secret
+    assert {c.chain_id for c in cfg.chains} == {ChainId.ETH_MAINNET}
     assert any(p.pair == 'ETH/USDT' for p in cfg.pairs)
+    # Every pair must have a pool_address — required for PricingEngine.load_pools().
+    assert all(p.pool_address for p in cfg.pairs)
 
 
 def test_load_prod_yaml():
     cfg = load_config(PROD_YAML, env=FAKE_ENV, load_dotenv_file=False)
     assert cfg.mode == Mode.PROD
     assert cfg.cex.testnet is False
-    assert cfg.cex.api_key == 'prod_key' # pragma: allowlist secret
+    assert cfg.cex.api_key.get_secret_value() == 'prod_key'  # pragma: allowlist secret
     assert cfg.executor.use_flashbots is True
     assert cfg.signal.min_spread_bps == Decimal('65')
 
@@ -146,6 +154,25 @@ def test_invalid_private_key_rejected():
         WalletConfig(private_key='0x1234')  # pragma: allowlist secret
 
 
+def test_secrets_masked_in_repr_and_dump():
+    """Regression guard: secrets must never appear in repr / model_dump_json /
+    error tracebacks. Read them only via .get_secret_value()."""
+    cfg = load_config_from_dict(_minimal_bot_dict(
+        wallet={'private_key': VALID_PRIVATE_KEY},
+        cex={'api_key': 'real_key', 'secret': 'real_secret'},  # pragma: allowlist secret
+    ))
+    rep = repr(cfg)
+    js = cfg.model_dump_json()
+    leaks = ['real_key', 'real_secret', VALID_PRIVATE_KEY.removeprefix('0x'),
+             '11111111111111111111111111111111']
+    for needle in leaks:
+        assert needle not in rep, f"secret leaked into repr: {needle}"
+        assert needle not in js, f"secret leaked into model_dump_json: {needle}"
+    # And we can still read them when actually needed:
+    assert cfg.cex.secret.get_secret_value() == 'real_secret'  # pragma: allowlist secret
+    assert cfg.wallet.private_key.get_secret_value() == VALID_PRIVATE_KEY
+
+
 def test_pair_format_validation():
     with pytest.raises(ValidationError, match="BASE/QUOTE"):
         PairConfig(pair='ETHUSDC', chain_id=ChainId.ETH_MAINNET, trade_size=Decimal('0.1'))
@@ -205,3 +232,48 @@ def test_router_and_factory_per_chain():
 def test_tokens_registry_covers_both_chains():
     assert ChainId.ETH_MAINNET in TOKENS
     assert ChainId.ARBITRUM in TOKENS
+
+
+# --- RiskLimitsConfig ---
+
+def test_risk_limits_defaults_within_absolutes():
+    rl = RiskLimitsConfig()
+    assert rl.max_trade_usd <= ABSOLUTE_MAX_TRADE_USD
+    assert rl.max_daily_loss <= ABSOLUTE_MAX_DAILY_LOSS
+    assert rl.initial_capital_usd >= ABSOLUTE_MIN_CAPITAL
+
+
+def test_risk_limits_max_trade_above_absolute_rejected():
+    with pytest.raises(ValidationError, match="ABSOLUTE_MAX_TRADE_USD"):
+        RiskLimitsConfig(max_trade_usd=ABSOLUTE_MAX_TRADE_USD + Decimal('1'))
+
+
+def test_risk_limits_daily_loss_above_absolute_rejected():
+    with pytest.raises(ValidationError, match="ABSOLUTE_MAX_DAILY_LOSS"):
+        RiskLimitsConfig(max_daily_loss=ABSOLUTE_MAX_DAILY_LOSS + Decimal('1'))
+
+
+def test_risk_limits_capital_below_absolute_rejected():
+    with pytest.raises(ValidationError, match="ABSOLUTE_MIN_CAPITAL"):
+        RiskLimitsConfig(initial_capital_usd=ABSOLUTE_MIN_CAPITAL - Decimal('1'))
+
+
+def test_risk_limits_to_runtime_round_trips():
+    rl = RiskLimitsConfig(max_trade_usd=Decimal('15'), consecutive_loss_limit=2)
+    runtime = rl.to_runtime()
+    assert isinstance(runtime, RuntimeRiskLimits)
+    assert runtime.max_trade_usd == Decimal('15')
+    assert runtime.consecutive_loss_limit == 2
+
+
+def test_test_yaml_has_risk_block():
+    cfg = load_config(TEST_YAML, env=FAKE_ENV, load_dotenv_file=False)
+    assert cfg.risk.max_trade_usd == Decimal('20')
+    assert cfg.risk.initial_capital_usd == Decimal('100')
+
+
+def test_prod_yaml_has_conservative_risk():
+    cfg = load_config(PROD_YAML, env=FAKE_ENV, load_dotenv_file=False)
+    # prod must be no looser than test
+    assert cfg.risk.max_trade_usd <= Decimal('5')
+    assert cfg.risk.max_daily_loss <= Decimal('10')

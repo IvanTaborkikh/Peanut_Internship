@@ -1,4 +1,8 @@
-.PHONY: run test lint format lint-fix install pre-commit-install clean analyze integration-test pricing-demo impact-analyzer test-mempool test-fork fork stop-fork smoke-exchange smoke-orderbook smoke-tracker arb-check rebalance-check rebalance-plan pnl-summary pnl-recent smoke-multi arb-log smoke e2e bot sim help
+.PHONY: run test lint format lint-fix install pre-commit-install clean analyze integration-test pricing-demo impact-analyzer test-mempool test-fork fork stop-fork smoke-exchange smoke-orderbook smoke-tracker arb-check rebalance-check rebalance-plan pnl-summary pnl-recent smoke-multi arb-log smoke e2e bot sim smoke-dex verify-tx dry-run dry-run-prod dry-run-chip flatten flatten-testnet kill unkill heartbeat help
+
+# Portable timeout: GNU coreutils ships `timeout` on Linux, `gtimeout` via brew on macOS.
+TIMEOUT := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
+DRY_RUN_SECONDS ?= 1800
 
 # ── OS detection ──────────────────────────────────────────────────────────────
 ifeq ($(OS),Windows_NT)
@@ -59,6 +63,20 @@ help:
 	@echo "    make sim TICKS=200        Custom tick count"
 	@echo "    make sim SEED=42          Reproducible run with fixed seed"
 	@echo "    make sim VERBOSE=1        Show per-tick log output"
+	@echo "    make smoke-dex            Real Uniswap V2 mainnet quotes vs Binance order book"
+	@echo "    make verify-tx            Verify tx_builder + unwind end-to-end (no RPC needed)"
+	@echo ""
+	@echo "  Safety / Operations (Week 5)"
+	@echo "    make dry-run                       Dry-run with configs/test.yaml (Binance testnet, 30 min)"
+	@echo "    make dry-run-prod                  Dry-run with configs/prod.yaml (Binance mainnet, dry_run=true)"
+	@echo "    make dry-run-chip                  Dry-run CHIP/USDT (Binance) ↔ Uniswap V3 CHIP/USDC (Arbitrum)"
+	@echo "    make dry-run CONFIG=path/foo.yaml  Custom config"
+	@echo "    DRY_RUN_SECONDS=300 make dry-run   Override 30-min cap (5 min smoke)"
+	@echo "    make flatten-testnet      Plan emergency flatten (testnet, dry preview)"
+	@echo "    make flatten              Plan emergency flatten (production, dry preview)"
+	@echo "    make kill                 Activate kill switch (touch /tmp/arb_bot_kill)"
+	@echo "    make unkill               Disarm kill switch"
+	@echo "    make heartbeat            Show current heartbeat age"
 	@echo ""
 	@echo "  Pricing"
 	@echo "    make pricing-demo             Run pricing module demo (no network needed)"
@@ -163,3 +181,55 @@ sim:
 		$(if $(TICKS),--ticks $(TICKS),) \
 		$(if $(SEED),--seed $(SEED),) \
 		$(if $(VERBOSE),--verbose,)
+
+smoke-dex:
+	PYTHONPATH=. $(PYTHON) scripts/smoke_real_dex.py
+
+verify-tx:
+	PYTHONPATH=. $(PYTHON) scripts/verify_tx_unwind.py
+
+dry-run: CONFIG ?= configs/test.yaml
+dry-run:
+ifeq ($(TIMEOUT),)
+	@echo "⚠️  No timeout binary. macOS: brew install coreutils. Running unbounded — Ctrl+C to stop."
+	PYTHONPATH=. $(PYTHON) scripts/arb_bot.py --config $(CONFIG) || true
+else
+	PYTHONPATH=. $(TIMEOUT) $(DRY_RUN_SECONDS) $(PYTHON) scripts/arb_bot.py --config $(CONFIG) || true
+endif
+	@echo ""
+	@echo "Dry-run finished. Latest log:"
+	@ls -t logs/bot_*.log 2>/dev/null | head -1
+	@echo ""
+	@echo "Would-trade signals captured:"
+	@latest=$$(ls -t logs/bot_*.log 2>/dev/null | head -1); \
+		if [ -n "$$latest" ]; then \
+			grep -c "DRY RUN | Would trade" "$$latest" 2>/dev/null || true; \
+		else echo 0; fi
+
+dry-run-prod:
+	@$(MAKE) dry-run CONFIG=configs/prod.yaml
+
+dry-run-chip:
+	@$(MAKE) dry-run CONFIG=configs/chip_observe.yaml
+
+flatten-testnet:
+	PYTHONPATH=. $(PYTHON) scripts/emergency_flatten.py --testnet
+
+flatten:
+	PYTHONPATH=. $(PYTHON) scripts/emergency_flatten.py
+
+kill:
+	touch /tmp/arb_bot_kill
+	@echo "Kill switch ARMED. Bot will stop within ~5s."
+
+unkill:
+	rm -f /tmp/arb_bot_kill
+	@echo "Kill switch disarmed."
+
+heartbeat:
+	@if [ -f /tmp/arb_bot_heartbeat ]; then \
+	  age=$$(echo "$$(date +%s) - $$(cat /tmp/arb_bot_heartbeat)" | bc -l); \
+	  printf "heartbeat age: %.0fs\n" $$age; \
+	else \
+	  echo "no heartbeat file — bot not running"; \
+	fi

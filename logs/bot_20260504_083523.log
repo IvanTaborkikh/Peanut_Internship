@@ -1,0 +1,36 @@
+2026-05-04 08:35:23,242 | INFO | Logging to file: logs/bot_20260504_083523.log
+2026-05-04 08:35:23,242 | INFO | Loading config: configs/chip_observe.yaml
+2026-05-04 08:35:23,971 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-04 08:35:23,984 | INFO | Checking exchange connection...
+2026-05-04 08:35:24,246 | INFO | Connected to exchange. Server time: 1777872924204
+2026-05-04 08:35:24,252 | INFO | DEX engine: Uniswap V3 (fee_tier=100)
+2026-05-04 08:35:24,257 | WARNING | PRODUCTION MODE (dry_run=True — no real trades)
+2026-05-04 08:35:24,257 | INFO | Bot starting | pairs=['CHIP/USDC'] | risk={'capital': '100', 'peak': '100', 'daily_pnl': '0', 'drawdown': '0.0%', 'consec_loss': 0, 'tph': 0}
+2026-05-04 08:35:28,263 | INFO | API key is valid (expiration unknown).
+2026-05-04 08:35:28,769 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 08:35:28,776 | INFO | Start polling
+2026-05-04 08:35:28,829 | INFO | Run polling for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-04 08:35:29,037 | INFO | fetch_order_book: mid=0.06055 spread=3.30bps bids=20 asks=20
+2026-05-04 08:35:30,085 | INFO | SPREAD | pair=CHIP/USDC | cex=0.06054/0.06056 | dex_sell=0.0605084 dex_buy=0.0605372 | spread_a=-8.5bps spread_b=0.5bps | min=-3.0bps
+2026-05-04 08:35:31,088 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 08:35:31,353 | INFO | fetch_order_book: mid=0.06055 spread=3.30bps bids=20 asks=20
+2026-05-04 08:35:32,313 | INFO | SPREAD | pair=CHIP/USDC | cex=0.06054/0.06056 | dex_sell=0.0605084 dex_buy=0.0605372 | spread_a=-8.5bps spread_b=0.5bps | min=-3.0bps
+2026-05-04 08:35:33,315 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 08:35:33,581 | INFO | fetch_order_book: mid=0.06055 spread=3.30bps bids=20 asks=20
+2026-05-04 08:35:34,546 | INFO | SPREAD | pair=CHIP/USDC | cex=0.06054/0.06056 | dex_sell=0.0605084 dex_buy=0.0605372 | spread_a=-8.5bps spread_b=0.5bps | min=-3.0bps
+2026-05-04 08:35:35,548 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 08:35:35,833 | INFO | fetch_order_book: mid=0.06055 spread=3.30bps bids=20 asks=20
+2026-05-04 08:35:36,789 | INFO | SPREAD | pair=CHIP/USDC | cex=0.06054/0.06056 | dex_sell=0.0605084 dex_buy=0.0605372 | spread_a=-8.5bps spread_b=0.5bps | min=-3.0bps
+2026-05-04 08:35:37,791 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 08:35:38,067 | INFO | fetch_order_book: mid=0.06054 spread=6.61bps bids=20 asks=20
+2026-05-04 08:35:39,050 | INFO | SPREAD | pair=CHIP/USDC | cex=0.06052/0.06056 | dex_sell=0.0605084 dex_buy=0.0605372 | spread_a=-8.5bps spread_b=-2.8bps | min=-3.0bps
+2026-05-04 08:35:40,052 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 08:35:40,315 | INFO | fetch_order_book: mid=0.060535 spread=4.96bps bids=20 asks=20
+2026-05-04 08:35:41,221 | INFO | Update id=722885962 is handled. Duration 168 ms by bot id=8642945117
+2026-05-04 08:35:41,222 | WARNING | Received SIGTERM — shutting down.
+2026-05-04 08:35:41,222 | INFO | Polling stopped
+2026-05-04 08:35:41,225 | ERROR | Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-05-04 08:35:41,225 | WARNING | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8642945117)
+2026-05-04 08:35:41,262 | INFO | SPREAD | pair=CHIP/USDC | cex=0.06052/0.06055 | dex_sell=0.0605084 dex_buy=0.0605372 | spread_a=-6.9bps spread_b=-2.8bps | min=-3.0bps
+2026-05-04 08:35:41,670 | INFO | Bot stopped.
+2026-05-04 08:35:41,671 | INFO | Polling stopped for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'

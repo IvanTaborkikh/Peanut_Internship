@@ -1,0 +1,69 @@
+2026-05-04 08:30:20,652 | INFO | Logging to file: logs/bot_20260504_083020.log
+2026-05-04 08:30:20,652 | INFO | Loading config: configs/test.yaml
+2026-05-04 08:30:21,317 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-04 08:30:21,319 | INFO | Checking exchange connection...
+2026-05-04 08:30:21,589 | INFO | Connected to exchange. Server time: 1777872621540
+2026-05-04 08:30:25,621 | INFO | Loaded 3 DEX pool(s) into pricing engine
+2026-05-04 08:30:25,634 | INFO | Test mode | dry_run=True
+2026-05-04 08:30:25,634 | INFO | Bot starting | pairs=['ETH/USDT', 'ETH/USDC', 'BTC/USDT'] | risk={'capital': '100', 'peak': '100', 'daily_pnl': '0', 'drawdown': '0.0%', 'consec_loss': 0, 'tph': 0}
+2026-05-04 08:30:27,058 | WARNING | apiRestrictions probe failed (non-fatal): binance does not have a testnet/sandbox URL for sapi endpoints
+2026-05-04 08:30:27,059 | INFO | API key is valid (expiration unknown).
+2026-05-04 08:30:27,760 | INFO | fetch_order_book: symbol=ETH/USDT limit=20
+2026-05-04 08:30:27,763 | INFO | Start polling
+2026-05-04 08:30:27,763 | INFO | Mempool monitor: starting WebSocket subscription to wss://eth-mainnet.g.alchemy.com/v2/lQaq5bsW03iORQr-McgyX
+2026-05-04 08:30:27,815 | INFO | Run polling for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-04 08:30:28,027 | INFO | fetch_order_book: mid=2377.195 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:29,132 | INFO | SPREAD | pair=ETH/USDT | cex=2377.19/2377.2 | dex_sell=2373.35 dex_buy=2395 | spread_a=-16.2bps spread_b=-74.4bps | min=50.0bps
+2026-05-04 08:30:29,133 | INFO | fetch_order_book: symbol=ETH/USDC limit=20
+2026-05-04 08:30:29,398 | INFO | fetch_order_book: mid=2377.095 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:30,574 | INFO | SPREAD | pair=ETH/USDC | cex=2377.09/2377.1 | dex_sell=2373.21 dex_buy=2394.84 | spread_a=-16.4bps spread_b=-74.1bps | min=50.0bps
+2026-05-04 08:30:30,575 | INFO | fetch_order_book: symbol=BTC/USDT limit=20
+2026-05-04 08:30:30,840 | INFO | fetch_order_book: mid=79991.055 spread=0.00bps bids=20 asks=20
+2026-05-04 08:30:31,849 | INFO | SPREAD | pair=BTC/USDT | cex=79991.1/79991.1 | dex_sell=79319.1 dex_buy=80725.6 | spread_a=-84.0bps spread_b=-91.0bps | min=50.0bps
+2026-05-04 08:30:32,851 | INFO | fetch_order_book: symbol=ETH/USDT limit=20
+2026-05-04 08:30:33,118 | INFO | fetch_order_book: mid=2376.925 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:34,055 | INFO | SPREAD | pair=ETH/USDT | cex=2376.92/2376.93 | dex_sell=2373.35 dex_buy=2395 | spread_a=-15.1bps spread_b=-75.5bps | min=50.0bps
+2026-05-04 08:30:34,056 | INFO | fetch_order_book: symbol=ETH/USDC limit=20
+2026-05-04 08:30:34,322 | INFO | fetch_order_book: mid=2376.795 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:35,247 | INFO | SPREAD | pair=ETH/USDC | cex=2376.79/2376.8 | dex_sell=2373.21 dex_buy=2394.84 | spread_a=-15.1bps spread_b=-75.4bps | min=50.0bps
+2026-05-04 08:30:35,248 | INFO | fetch_order_book: symbol=BTC/USDT limit=20
+2026-05-04 08:30:35,513 | INFO | fetch_order_book: mid=79994.555 spread=0.00bps bids=20 asks=20
+2026-05-04 08:30:36,462 | INFO | SPREAD | pair=BTC/USDT | cex=79994.6/79994.6 | dex_sell=79319.1 dex_buy=80725.6 | spread_a=-84.4bps spread_b=-90.6bps | min=50.0bps
+2026-05-04 08:30:37,465 | INFO | fetch_order_book: symbol=ETH/USDT limit=20
+2026-05-04 08:30:37,736 | INFO | fetch_order_book: mid=2376.925 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:38,770 | INFO | SPREAD | pair=ETH/USDT | cex=2376.92/2376.93 | dex_sell=2373.35 dex_buy=2395 | spread_a=-15.1bps spread_b=-75.5bps | min=50.0bps
+2026-05-04 08:30:38,771 | INFO | fetch_order_book: symbol=ETH/USDC limit=20
+2026-05-04 08:30:39,033 | INFO | fetch_order_book: mid=2376.795 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:39,993 | INFO | SPREAD | pair=ETH/USDC | cex=2376.79/2376.8 | dex_sell=2373.21 dex_buy=2394.84 | spread_a=-15.1bps spread_b=-75.4bps | min=50.0bps
+2026-05-04 08:30:39,994 | INFO | fetch_order_book: symbol=BTC/USDT limit=20
+2026-05-04 08:30:40,265 | INFO | fetch_order_book: mid=79994.555 spread=0.00bps bids=20 asks=20
+2026-05-04 08:30:41,264 | INFO | SPREAD | pair=BTC/USDT | cex=79994.6/79994.6 | dex_sell=79319.1 dex_buy=80725.6 | spread_a=-84.4bps spread_b=-90.6bps | min=50.0bps
+2026-05-04 08:30:42,266 | INFO | fetch_order_book: symbol=ETH/USDT limit=20
+2026-05-04 08:30:42,552 | INFO | fetch_order_book: mid=2376.925 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:43,518 | INFO | POOL_REFRESH | Address(…=3461472850552351214001/8252662450529 | Address(…=9844179000702/4129281161053201495877 | Address(…=5711091356/1916819841462706675814
+2026-05-04 08:30:43,524 | INFO | SPREAD | pair=ETH/USDT | cex=2376.92/2376.93 | dex_sell=2373.35 dex_buy=2395 | spread_a=-15.1bps spread_b=-75.5bps | min=50.0bps
+2026-05-04 08:30:43,525 | INFO | fetch_order_book: symbol=ETH/USDC limit=20
+2026-05-04 08:30:43,798 | INFO | fetch_order_book: mid=2376.795 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:44,773 | INFO | SPREAD | pair=ETH/USDC | cex=2376.79/2376.8 | dex_sell=2373.21 dex_buy=2394.84 | spread_a=-15.1bps spread_b=-75.4bps | min=50.0bps
+2026-05-04 08:30:44,774 | INFO | fetch_order_book: symbol=BTC/USDT limit=20
+2026-05-04 08:30:45,039 | INFO | fetch_order_book: mid=79994.555 spread=0.00bps bids=20 asks=20
+2026-05-04 08:30:46,069 | INFO | SPREAD | pair=BTC/USDT | cex=79994.6/79994.6 | dex_sell=79319.1 dex_buy=80725.6 | spread_a=-84.4bps spread_b=-90.6bps | min=50.0bps
+2026-05-04 08:30:47,072 | INFO | fetch_order_book: symbol=ETH/USDT limit=20
+2026-05-04 08:30:47,339 | INFO | fetch_order_book: mid=2376.925 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:48,346 | INFO | SPREAD | pair=ETH/USDT | cex=2376.92/2376.93 | dex_sell=2373.35 dex_buy=2395 | spread_a=-15.1bps spread_b=-75.5bps | min=50.0bps
+2026-05-04 08:30:48,348 | INFO | fetch_order_book: symbol=ETH/USDC limit=20
+2026-05-04 08:30:48,619 | INFO | fetch_order_book: mid=2376.795 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:49,565 | INFO | SPREAD | pair=ETH/USDC | cex=2376.79/2376.8 | dex_sell=2373.21 dex_buy=2394.84 | spread_a=-15.1bps spread_b=-75.4bps | min=50.0bps
+2026-05-04 08:30:49,566 | INFO | fetch_order_book: symbol=BTC/USDT limit=20
+2026-05-04 08:30:49,827 | INFO | fetch_order_book: mid=79994.555 spread=0.00bps bids=20 asks=20
+2026-05-04 08:30:50,808 | INFO | SPREAD | pair=BTC/USDT | cex=79994.6/79994.6 | dex_sell=79319.1 dex_buy=80725.6 | spread_a=-84.4bps spread_b=-90.6bps | min=50.0bps
+2026-05-04 08:30:51,811 | INFO | fetch_order_book: symbol=ETH/USDT limit=20
+2026-05-04 08:30:52,033 | INFO | Update id=722885961 is handled. Duration 160 ms by bot id=8642945117
+2026-05-04 08:30:52,033 | WARNING | Received SIGTERM — shutting down.
+2026-05-04 08:30:52,034 | INFO | Polling stopped
+2026-05-04 08:30:52,036 | ERROR | Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-05-04 08:30:52,036 | WARNING | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8642945117)
+2026-05-04 08:30:52,076 | INFO | fetch_order_book: mid=2376.995 spread=0.04bps bids=20 asks=20
+2026-05-04 08:30:52,468 | INFO | Bot stopped.
+2026-05-04 08:30:52,469 | INFO | Polling stopped for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-04 08:30:53,063 | INFO | SPREAD | pair=ETH/USDT | cex=2376.99/2377 | dex_sell=2373.35 dex_buy=2395 | spread_a=-15.4bps spread_b=-75.2bps | min=50.0bps

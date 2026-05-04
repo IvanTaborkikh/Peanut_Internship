@@ -62,6 +62,10 @@ class ExecutorConfig:
     dry_run: bool = True           # when tx_builder is wired: build & sign, never broadcast
     slippage_bps: Decimal = Decimal('30')
     gas_cost_usd: Decimal = Decimal('0.5')
+    # PnL fee rates — defaults match Binance VIP-0 taker (10 bps) and Uniswap V2 swap (30 bps).
+    # Override via FeesConfig when wiring from BotConfig.
+    cex_taker_bps: Decimal = Decimal('10')
+    dex_swap_bps: Decimal = Decimal('30')
 
 
 class Executor:
@@ -358,6 +362,6 @@ class Executor:
             gross = (dex_price - cex_price) * matched
         else:
             gross = (cex_price - dex_price) * matched
-        cex_fee = cex_size * cex_price * Decimal('0.001')  # 10 bps taker
-        dex_fee = dex_size * dex_price * Decimal('0.003')  # 30 bps swap fee
+        cex_fee = cex_size * cex_price * (self.config.cex_taker_bps / Decimal('10000'))
+        dex_fee = dex_size * dex_price * (self.config.dex_swap_bps / Decimal('10000'))
         return gross - cex_fee - dex_fee - self.config.gas_cost_usd

@@ -51,6 +51,29 @@ class ExchangeClient:
         self._load_rate_limits()
         self._check_connection()
 
+    @classmethod
+    def from_config(cls, cex_config) -> "ExchangeClient":
+        """Build from a `CexConfig` (pydantic model with SecretStr fields).
+
+        Translates SecretStr → str at the boundary so ccxt sees a normal dict.
+        Use this in production paths; the dict ctor remains for tests.
+        """
+        return cls({
+            'apiKey':  cex_config.api_key.get_secret_value(),
+            'secret':  cex_config.secret.get_secret_value(),
+            'sandbox': cex_config.testnet,
+            'options': {'defaultType': 'spot'},
+            'enableRateLimit': True,
+        })
+
+    def client_for_health_check(self):
+        """Return the underlying ccxt instance for `ApiKeyHealthCheck`.
+
+        Sole intended caller is the safety health-check probe; nothing else
+        should reach into the raw ccxt client directly.
+        """
+        return self._exchange
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

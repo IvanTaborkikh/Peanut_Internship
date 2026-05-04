@@ -135,9 +135,34 @@ src/
   integration/            # Week 3 — end-to-end arb detection
     arb_checker.py        # ArbChecker (DEX price + CEX order book → opportunity assessment)
     arb_logger.py         # ArbLogger (append every check() result to CSV for analysis)
-  strategy/               # Week 4 — coming soon
-  executor/               # Week 4 — coming soon
-  safety/                 # Week 5 — coming soon
+  strategy/               # Week 4 — signal generation & scoring
+    signal.py             # Signal dataclass + Direction enum, TTL/inventory/limit checks
+    fees.py               # FeeStructure — breakeven spread and net-profit calculation
+    scorer.py             # SignalScorer — weighted score + time decay
+    generator.py          # SignalGenerator — CEX order book + DEX quote → Signal
+  executor/               # Week 4 — trade execution FSM
+    engine.py             # Executor FSM (CEX-first / DEX-first, timeouts, partial fills)
+    recovery.py           # CircuitBreaker + ReplayProtection
+    tx_builder.py         # Builds & signs Uniswap V2 swap txs, validates CEX orders
+    unwind.py             # plan_unwind + execute_unwind — market-order flatten
+  notifications/          # Week 4 — operator alerting
+    telegram_notifier.py  # Telegram bot — signals, execution, CB, full control plane
+  configs/                # Week 4 — typed configuration
+    schema.py             # BotConfig + RiskLimitsConfig pydantic models
+    tokens.py             # Per-chain token registry (ETH mainnet + Arbitrum)
+    loader.py             # YAML loader with ${ENV_VAR} expansion
+  safety/                 # Week 5 — risk management & kill switches
+    limits.py             # RiskLimits + RiskManager (per-trade, daily loss, drawdown, frequency)
+    validator.py          # PreTradeValidator (spread sanity, signal age, price deviation)
+    killswitch.py         # File kill switch, AutoKillSwitch, ABSOLUTE_* constants, write_heartbeat
+    metrics.py            # ExecutionMetrics + ErrorTracker (windowed error counting)
+    pause.py              # TradingPauseManager — time-bounded pause with auto-resume
+    api_key_health.py     # ApiKeyHealthCheck — startup + periodic key validity probe
+  exchange/               # Week 3 + Week 5 additions
+    stablecoin_converter.py # Live USDC/USDT rate via Binance for cross-quote spread correction
+  pricing/                # Week 2 + Week 5 additions
+    uniswap_v3_quoter.py  # On-chain Uniswap V3 Quoter (CHIP/USDC Arbitrum pool)
+    v3_pricing_engine.py  # V3 pricing engine wrapper used by chip_observe config
 scripts/
   integration_test.py     # Week 1 — End-to-end Sepolia test
   pricing_demo.py         # Week 2 — Pricing module demo (no network needed)
@@ -148,7 +173,14 @@ scripts/
   smoke_orderbook.py      # Week 3 — Formatted order book report with depth analysis
   smoke_tracker.py        # Week 3 — Inventory snapshot + skew analysis
   smoke_multi_exchange.py # Week 3 — Multi-exchange arb check (Bybit vs Binance)
-tests/                    # 392 unit tests
+  arb_bot.py              # Week 4/5 — main bot entry point
+  emergency_flatten.py    # Week 5 — market-sell all non-stable balances (dry-run by default)
+  smoke_real_dex.py       # Week 5 — smoke test against production DEX/CEX
+configs/
+  test.yaml               # Binance testnet + mainnet RPC, dry_run=true
+  prod.yaml               # Binance mainnet + mainnet RPC, Day-1 risk limits
+  chip_observe.yaml       # CHIP/USDC arb observation on Arbitrum (Uniswap V3)
+tests/                    # 637 unit tests
 .env                      # Secret config — never commit!
 .env.example              # Safe template
 .pre-commit-config.yaml   # ruff + detect-secrets hooks
@@ -746,6 +778,107 @@ pytest tests/test_executor.py -q   # week-4 executor only
 
 ---
 
+## Week 5 — Risk, Safety & Go-Live Prep
+
+### What was added
+
+| Module | Description |
+|--------|-------------|
+| `safety/limits.py` | `RiskLimits` dataclass + `RiskManager` — per-trade USD/%, daily loss, drawdown, hourly window (deque), consecutive losses, snapshot for logging |
+| `safety/validator.py` | `PreTradeValidator` — spread sanity (>500 bps), age (>5 s), price sanity, optional `validate_price_feed` with deviation guard |
+| `safety/killswitch.py` | File-based kill switch (`/tmp/arb_bot_kill`), `AutoKillSwitch` (capital floor + error rate), `ABSOLUTE_*` hardcoded ceilings, `safety_check()` final gate, `write_heartbeat()` |
+| `safety/metrics.py` | `ExecutionMetrics` (pipeline counters) + `ErrorTracker` (windowed error counts by type) |
+| `safety/pause.py` | `TradingPauseManager` — time-bounded pause with auto-resume, used by Telegram `/pause` |
+| `safety/api_key_health.py` | `ApiKeyHealthCheck` — startup + periodic 15-min probe for key validity and expiration |
+| `configs/schema.py` | `RiskLimitsConfig` pydantic model — validates against `ABSOLUTE_*` at config-load time, `to_runtime()` bridges to dataclass |
+| `exchange/stablecoin_converter.py` | Pulls live USDC/USDT rate from Binance to correct cross-quote spread (used by CHIP/USDC config) |
+| `pricing/uniswap_v3_quoter.py` | On-chain Uniswap V3 Quoter for `quoteExactInputSingle` (Arbitrum CHIP/USDC pool) |
+| `pricing/v3_pricing_engine.py` | V3 pricing engine wrapper — drop-in replacement for V2 engine when `dex.version = v3` |
+| `scripts/arb_bot.py` | Six-layer protection wired into `_on_price_tick` and `_on_signal_scored`; structured file logging; heartbeat task; `verify_balances()` post-trade |
+| `scripts/emergency_flatten.py` | Standalone CLI: market-sell every non-stable balance to USDT. Dry-run by default. |
+| `configs/chip_observe.yaml` | CHIP/USDC arb observation on Arbitrum — Uniswap V3 (0.01% pool), Binance mainnet, dry_run=true |
+| `docs/operations.md` | STOP protocol, decision framework, API key rotation, journal template, log analysis recipes |
+| `preflight_checklist.md` | Required for instructor sign-off before any real-money trading |
+
+### Six layers of protection in the hot path
+
+```
+PriceTick →
+  ├ L1: file kill switch       (/tmp/arb_bot_kill)
+  ├ L2: auto kill switch        (capital < 50% / error rate)
+  ├ L3: circuit breaker         (failure burst)
+  └ generate signal
+       ↓
+SignalScored →
+  ├ score >= min_score          (quality)
+  ├ L4: validator               (sanity: spread, age, prices)
+  ├ L5: risk_manager            (configurable: trade size, daily, drawdown, ...)
+  ├ L6: safety_check            (ABSOLUTE_* hardcoded — non-negotiable)
+  └ executor.execute()
+       ↓
+ExecutionDone →
+  ├ record_trade(pnl)           (updates capital/peak/consec)
+  └ verify_balances() (call site optional, on real trades)
+```
+
+Each layer has its own test suite. Misconfiguring `risk_limits` does not bypass `ABSOLUTE_*` — that's the point.
+
+### Day-1 production limits (`configs/prod.yaml`)
+
+```yaml
+risk:
+  initial_capital_usd: 100
+  max_trade_usd:        5
+  max_daily_loss:      10
+  max_drawdown_pct:    0.15
+  max_trades_per_hour: 10
+  consecutive_loss_limit: 2
+```
+
+Ramp-up to Day-4-5 limits ($20 trade, $20 daily) requires instructor sign-off in `preflight_checklist.md`.
+
+### Operating the bot
+
+```bash
+make dry-run               # 30-min run with file logging, captures DRY RUN signals
+make kill                  # arm kill switch (operator override)
+make unkill                # disarm
+make heartbeat             # check liveness without reading logs
+make flatten-testnet       # preview emergency flatten on testnet
+make flatten               # preview emergency flatten on production
+```
+
+For live emergency:
+```bash
+make kill                                          # 1. stop the bot
+PYTHONPATH=. python scripts/emergency_flatten.py   # 2. preview the unwind
+PYTHONPATH=. python scripts/emergency_flatten.py --confirm   # 3. execute
+```
+
+Full operator guide: **[docs/operations.md](docs/operations.md)**.
+
+### Tests
+
+- `test_risk_manager.py` — 11 tests: per-trade, capital %, daily loss, drawdown, consecutive (with reset on win), hourly window, peak preservation, daily reset, snapshot
+- `test_kill_switch.py` — 11 tests: file present/absent, AutoKillSwitch capital floor + error rate + reset, all 4 `ABSOLUTE_*` boundary tests, heartbeat write
+- `test_validator.py` — 11 tests: valid pass, ≤0 prices, zero size, absurd spread, stale signal, price-feed history seeding/rejection/acceptance, age boundary at 5.0 s
+- `test_arb_bot_wiring.py` — 26 tests: kill switch stops bot, auto-kill below capital floor stops, low score skipped, validator/risk gates block, happy path records PnL, FAILED increments error count, DRY RUN log line emitted, `from_config` plumbs risk, auto-pause after consecutive losses
+- `test_emergency_flatten.py` — 8 tests: stable skip, zero skip, non-stable include, min-amount filter, missing market filter, render formatting
+- `test_telegram_commands.py` — 16 tests: control plane commands, DRY→REAL flip, expired confirmation rejection
+- `test_pause_manager.py` — 7 tests: pause/resume, auto-resume on deadline, cancel
+- `test_execution_metrics.py` / `test_error_tracker.py` — pipeline counters + windowed error tracking
+- `test_dynamic_limits.py` — 11 tests: limit updates, ABSOLUTE_* ceiling enforcement
+- `test_api_key_health.py` — API key validity and expiration checks
+- `test_v3_quoter.py` / `test_stablecoin_converter.py` — V3 pricing and stablecoin rate
+
+```bash
+make test                                  # 637 total
+pytest tests/test_risk_manager.py -v       # week-5 RiskManager only
+pytest tests/test_arb_bot_wiring.py -v     # bot ↔ safety integration
+```
+
+---
+
 ## Make Commands
 
 Run `make help` to see all available commands.
@@ -762,7 +895,7 @@ Run `make help` to see all available commands.
 | Command | Description            |
 |---------|------------------------|
 | `make run` | Run `src/main.py` entry point |
-| `make test` | Run the full unit-test suite (490 tests) |
+| `make test` | Run the full unit-test suite (637 tests) |
 | `make lint` | Check code with ruff |
 | `make lint-fix` | Auto-fix lint errors |
 | `make format` | Auto-format code |
@@ -800,6 +933,20 @@ Run `make help` to see all available commands.
 | `make e2e` | Full e2e — 8 scenarios (replay, CB, partial fill, etc.) |
 | `make bot` | Run arb bot in simulation mode (Ctrl+C to stop) `[PAIR=ETH/USDT]` |
 | `make sim` | Realistic market simulation `[TICKS=200 SEED=42 VERBOSE=1]` |
+| `make smoke-dex` | Real Uniswap V2 mainnet quotes vs Binance order book (needs `MAINNET_RPC_URL`) |
+| `make verify-tx` | Verify tx_builder + unwind end-to-end (no RPC/keys) |
+
+**Safety / Operations (Week 5)**
+
+| Command | Description |
+|---------|-------------|
+| `make dry-run` | Run bot 30 min, Binance testnet config, capture logs |
+| `make dry-run-chip` | Run bot 30 min, CHIP/USDC Arbitrum config, capture logs |
+| `make flatten-testnet` | Plan emergency flatten on testnet (dry preview) |
+| `make flatten` | Plan emergency flatten on production (dry preview) |
+| `make kill` | Activate kill switch (`touch /tmp/arb_bot_kill`) |
+| `make unkill` | Disarm kill switch |
+| `make heartbeat` | Show current heartbeat age in seconds |
 
 **Pricing**
 
@@ -837,6 +984,23 @@ Run `make help` to see all available commands.
 
 ## Changelog
 
+### Week 5 — Risk, Safety & Go-Live Prep
+- `safety/`: `RiskLimits`, `RiskManager` (per-trade USD/%, daily loss, drawdown, hourly window, consecutive losses), `PreTradeValidator` (spread/age/price sanity), `AutoKillSwitch` (capital floor + error rate), file kill switch, `ABSOLUTE_*` hardcoded ceilings, `safety_check()` final gate, `write_heartbeat()`
+- `configs/schema.py`: `RiskLimitsConfig` pydantic model with cross-validation against `ABSOLUTE_*`, `to_runtime()` bridge to dataclass
+- `configs/test.yaml` + `configs/prod.yaml`: separate risk blocks; prod = Day-1 conservative ($5/$10) with ramp-up plan in comments
+- `scripts/arb_bot.py`: six-layer protection wired into `_on_price_tick` and `_on_signal_scored`; structured file logging (`logs/bot_*.log`); heartbeat task every 30 s; PRODUCTION MODE warning at startup; `verify_balances()` post-trade
+- `exchange/stablecoin_converter.py`: live USDC/USDT rate from Binance for cross-quote spread correction
+- `pricing/uniswap_v3_quoter.py` + `pricing/v3_pricing_engine.py`: on-chain V3 quoting for CHIP/USDC on Arbitrum
+- `safety/metrics.py`: `ExecutionMetrics` + `ErrorTracker` with windowed grouping; exposed via `/metrics` and `/errors`
+- `safety/pause.py`: `TradingPauseManager` — time-bounded pause with auto-resume
+- `safety/api_key_health.py`: startup probe + periodic 15-min re-check for key validity and expiration
+- `scripts/arb_bot.py`: six-layer protection wired into `_on_price_tick` and `_on_signal_scored`; structured file logging (`logs/bot_*.log`); heartbeat task every 30 s; PRODUCTION MODE warning at startup; `verify_balances()` post-trade; API key health loop; full Telegram control plane
+- `scripts/emergency_flatten.py`: standalone CLI to market-sell every non-stable balance, dry-run by default
+- `configs/chip_observe.yaml`: CHIP/USDC Arbitrum observation config (Uniswap V3, 0.01% fee tier)
+- `docs/operations.md`: STOP protocol, decision framework, daily ramp-up, journal template, log-analysis recipes, API key expiration section
+- `preflight_checklist.md`: required for instructor sign-off before real trading
+- 637 unit tests passing (81 new: safety + wiring + flatten + control-plane + V3 + stablecoin)
+
 ### Week 4 — Strategy, Execution & Recovery
 - `strategy/`: `Signal`, `FeeStructure`, `SignalScorer` (weighted: spread/liquidity/inventory/history), `SignalGenerator` with TTL + cooldown
 - `executor/engine.py`: FSM `ExecutorState` with both `_execute_cex_first` and `_execute_dex_first`, asyncio timeouts, partial-fill threshold + unwind, `execution_quality = actual/expected`
@@ -846,7 +1010,8 @@ Run `make help` to see all available commands.
 - `notifications/telegram_notifier.py`: execution + circuit-breaker + manual-action alerts
 - `configs/`: pydantic schema, per-chain token registry (ETH mainnet + Arbitrum), YAML configs with `${VAR}` expansion, separate `test.yaml` / `prod.yaml`
 - `docs/unwind_strategy.md`: design doc for unwind decision tree
-- 490 unit tests passing
+- `docs/strategy_review.md`: edge thesis, breakeven economics, MEV reality, risk inventory, gates before flipping `dry_run` off
+- 556 unit tests passing at end of Week 4
 
 ### Week 3 — Exchange, Inventory & Arb Detection
 - `exchange/client.py`: ExchangeClient with rolling-window rate limiter, dynamic limit loading from `/exchangeInfo`, server-side weight sync via `X-MBX-USED-WEIGHT-1M` header
