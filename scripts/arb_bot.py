@@ -127,13 +127,60 @@ class ArbBot:
             **gen_kwargs,
         )
         self.scorer = SignalScorer()
+
+        # Optional TxBuilder wiring — present only when we have an Arbitrum-
+        # compatible wallet (PRIVATE_KEY in env) AND a chain client. With it,
+        # the executor moves off legacy simulation_mode and onto the
+        # build-and-(maybe)-broadcast code path. The bot-level dry_run flag
+        # still gates real broadcasting.
+        self.tx_builder = None
+        if config.get('rpc_url') and os.getenv('PRIVATE_KEY'):
+            try:
+                from web3 import Web3
+                from eth_account import Account
+                from src.executor.tx_builder import TxBuilder
+                from src.configs.schema import ChainId
+                w3 = Web3(Web3.HTTPProvider(config['rpc_url']))
+                account = Account.from_key(os.getenv('PRIVATE_KEY'))
+                self.tx_builder = TxBuilder(
+                    web3=w3,
+                    chain_id=ChainId(int(config.get('chain_id') or 42161)),
+                    account=account,
+                    exchange_client=self.exchange._exchange if hasattr(self.exchange, '_exchange') else None,
+                    dex_version=str(config.get('dex_version', 'v2')).lower(),
+                    fee_tier=int(config.get('dex_fee_tier', 3000)),
+                )
+                logging.info("TxBuilder wired: address=%s dex=%s fee_tier=%s",
+                             account.address, config.get('dex_version', 'v2'),
+                             config.get('dex_fee_tier', 3000))
+            except Exception as e:
+                logging.warning("TxBuilder NOT wired (will use legacy simulation): %s", e)
+                self.tx_builder = None
+
+        # When TxBuilder is wired, simulation_mode must be False so the
+        # executor takes the builder path (and respects dry_run for broadcast).
+        # When unwired, we fall back to the legacy sim path.
+        sim_mode = config.get('simulation', True) if self.tx_builder is None else False
+        executor_chain_id = None
+        if self.tx_builder is not None and config.get('chain_id'):
+            from src.configs.schema import ChainId as _ChainId
+            executor_chain_id = _ChainId(int(config['chain_id']))
+        # Read min_profit_usd from signal_config so executor's is_valid() check
+        # uses the same threshold as the signal generator's filter.
+        signal_cfg = config.get('signal_config') or {}
+        executor_min_profit = Decimal(str(signal_cfg.get('min_profit_usd', '0')))
         self.executor = Executor(
             self.exchange, self.pricing_engine, self.inventory,
             ExecutorConfig(
-                simulation_mode=config.get('simulation', True),
+                simulation_mode=sim_mode,
                 use_flashbots=config.get('use_flashbots', False),
                 gas_cost_usd=Decimal(str(config.get('gas_cost_usd', '0.5'))),
-            )
+                dry_run=bool(config.get('dry_run', True)),
+                slippage_bps=Decimal(str(config.get('slippage_bps', '50'))),
+                min_profit_usd=executor_min_profit,
+            ),
+            tx_builder=self.tx_builder,
+            chain_id=executor_chain_id,
         )
 
         self.pairs = config.get('pairs', ['ETH/USDT'])
@@ -199,11 +246,12 @@ class ArbBot:
             'dex_quote_override':   dict(cfg.dex_quote_override),
             'stablecoin_converter': cfg.stablecoin_converter,
             'trade_size': str(cfg.pairs[0].trade_size) if cfg.pairs else '0.1',
-            'simulation':    True,   # main-loop stays in legacy sim until tx_builder is wired here
+            'simulation':    False,  # ArbBot.__init__ ignores this when tx_builder wires up; left as fallback only when PRIVATE_KEY is missing
             'dry_run':       cfg.dry_run,
             'production':    cfg.mode == Mode.PROD,
             'use_flashbots': cfg.executor.use_flashbots,
             'gas_cost_usd':  str(cfg.fees.gas_cost_usd_default),
+            'slippage_bps':  str(cfg.executor.slippage_bps),
             'risk_limits':         cfg.risk.to_runtime(),
             'initial_capital_usd': str(cfg.risk.initial_capital_usd),
             'signal_config': {
@@ -222,6 +270,7 @@ class ArbBot:
         self.bus.subscribe(SignalScoredEvent, self._on_signal_scored)
         self.bus.subscribe(ExecutionDoneEvent, self._on_execution_done)
         if self.notifier:
+            self.bus.subscribe(SignalGeneratedEvent, self.notifier.on_signal_generated)
             self.bus.subscribe(ExecutionDoneEvent, self.notifier.on_execution_done)
 
     async def run(self):
@@ -715,16 +764,52 @@ class ArbBot:
         return True
 
     def _fetch_wallet_balances(self) -> dict:
-        # Wallet balance fetch is part of Phase 4 wiring; ChainClient may not
-        # expose `get_wallet_balances` yet. In that case skip silently — empty
-        # dict means inventory checks for the wallet venue see zero balance.
-        if self.chain_client is None or not hasattr(self.chain_client, 'get_wallet_balances'):
+        """Read on-chain ETH + ERC20 balances for tokens used by configured pairs.
+
+        Returns {asset_symbol: amount_as_float}. Tokens not in the registry are
+        skipped (best-effort — caller treats missing as zero).
+        """
+        if self.tx_builder is None:
             return {}
+        from src.configs.tokens import get_token
+
+        web3 = self.tx_builder.web3
+        chain_id = self.tx_builder.chain_id
+        address = self.tx_builder.account.address
+
+        erc20_abi = [
+            {"name": "balanceOf", "type": "function", "stateMutability": "view",
+             "inputs": [{"type": "address", "name": "owner"}],
+             "outputs": [{"type": "uint256"}]},
+        ]
+
+        balances = {}
         try:
-            return self.chain_client.get_wallet_balances()
+            balances['ETH'] = float(Decimal(str(web3.eth.get_balance(address))) / Decimal('1000000000000000000'))
         except Exception as e:
-            logging.warning(f"Failed to fetch wallet balances: {e}")
-            return {}
+            logging.warning(f"_fetch_wallet_balances: ETH fetch failed: {e}")
+
+        symbols = set()
+        for pair in self.pairs:
+            base, quote = pair.split('/')
+            symbols.add(base)
+            symbols.add(quote)
+
+        for sym in symbols:
+            if sym in ('ETH',):
+                continue
+            try:
+                token = get_token(chain_id, sym)
+                contract = web3.eth.contract(address=token.address.checksum, abi=erc20_abi)
+                raw = contract.functions.balanceOf(address).call()
+                balances[sym] = float(Decimal(str(raw)) / Decimal(10 ** token.decimals))
+            except KeyError:
+                logging.debug(f"_fetch_wallet_balances: {sym} not in token registry, skipping")
+            except Exception as e:
+                logging.warning(f"_fetch_wallet_balances: {sym} fetch failed: {e}")
+
+        logging.info(f"Wallet balances: {balances}")
+        return balances
 
     def stop(self):
         self.running = False

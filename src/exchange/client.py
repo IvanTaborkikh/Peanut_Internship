@@ -33,6 +33,11 @@ class ExchangeClient:
             'secret': config.get('secret'),
             'options': config.get('options', {'defaultType': 'spot'}),
             'enableRateLimit': config.get('enableRateLimit', True),
+            # Default ccxt timeout is 10s for fetch but ~30-60s for create_order
+            # depending on connection state. The 2026-05-10 12:22 incident saw a
+            # 42-second timeout while a 86 bps spread fully decayed. Cap at 8s
+            # so the bot fails fast and the signal generator can re-evaluate.
+            'timeout': config.get('timeout_ms', 8000),
         })
         if config.get('sandbox', False):
             self._exchange.set_sandbox_mode(True)

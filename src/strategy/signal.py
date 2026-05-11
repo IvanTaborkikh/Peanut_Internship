@@ -41,12 +41,14 @@ class Signal:
             **kwargs
         )
 
-    def is_valid(self) -> bool:
+    def is_valid(self, min_pnl: "Decimal | None" = None) -> bool:
+        from decimal import Decimal
+        threshold = Decimal('0') if min_pnl is None else min_pnl
         return (
             time.time() < self.expiry and
             self.inventory_ok and
             self.within_limits and
-            self.expected_net_pnl > 0 and
+            self.expected_net_pnl > threshold and
             self.score > 0
         )
 

@@ -12,7 +12,7 @@ from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from src.configs.schema import ChainId
-from src.configs.tokens import get_router
+from src.configs.tokens import get_router, get_v3_router
 from src.core.types import Token
 from src.strategy.signal import Direction, Signal
 
@@ -30,6 +30,33 @@ UNISWAP_V2_ROUTER_ABI = [
         "name": "swapExactTokensForTokens",
         "outputs": [{"internalType": "uint256[]", "name": "amounts", "type": "uint256[]"}],
         "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+
+# Minimal SwapRouter02 ABI — only exactInputSingle, the single-hop variant
+# used for direct CHIP/USDC, ETH/USDC, etc. Multi-hop V3 routing would need
+# `exactInput` with an encoded path — out of scope here.
+UNISWAP_V3_ROUTER_ABI = [
+    {
+        "inputs": [{
+            "components": [
+                {"internalType": "address", "name": "tokenIn",           "type": "address"},
+                {"internalType": "address", "name": "tokenOut",          "type": "address"},
+                {"internalType": "uint24",  "name": "fee",               "type": "uint24"},
+                {"internalType": "address", "name": "recipient",         "type": "address"},
+                {"internalType": "uint256", "name": "amountIn",          "type": "uint256"},
+                {"internalType": "uint256", "name": "amountOutMinimum",  "type": "uint256"},
+                {"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"},
+            ],
+            "internalType": "struct IV3SwapRouter.ExactInputSingleParams",
+            "name": "params",
+            "type": "tuple",
+        }],
+        "name": "exactInputSingle",
+        "outputs": [{"internalType": "uint256", "name": "amountOut", "type": "uint256"}],
+        "stateMutability": "payable",
         "type": "function",
     },
 ]
@@ -69,7 +96,12 @@ class PreparedCexOrder:
 
 
 class TxBuilder:
-    """Builds (and signs, for DEX) the exact transactions an Executor would submit."""
+    """Builds (and signs, for DEX) the exact transactions an Executor would submit.
+
+    `dex_version` selects between Uniswap V2 (`swapExactTokensForTokens`,
+    address-array path) and Uniswap V3 SwapRouter02 (`exactInputSingle`,
+    fee-tier-keyed pool). For V3, `fee_tier` is required (100/500/3000/10000).
+    """
 
     def __init__(
         self,
@@ -78,16 +110,25 @@ class TxBuilder:
         account: LocalAccount,
         exchange_client=None,
         priority_fee_gwei: int = 2,
+        dex_version: str = 'v2',
+        fee_tier: int = 3000,
     ):
         self.web3 = web3
         self.chain_id = chain_id
         self.account = account
         self.exchange = exchange_client
         self.priority_fee_wei = Web3.to_wei(priority_fee_gwei, 'gwei')
+        self.dex_version = dex_version.lower()
+        self.fee_tier = int(fee_tier)
 
-        router_addr = get_router(chain_id).checksum
-        self.router_address = router_addr
-        self.router = web3.eth.contract(address=router_addr, abi=UNISWAP_V2_ROUTER_ABI)
+        if self.dex_version == 'v3':
+            router_addr = get_v3_router(chain_id).checksum
+            self.router_address = router_addr
+            self.router = web3.eth.contract(address=router_addr, abi=UNISWAP_V3_ROUTER_ABI)
+        else:
+            router_addr = get_router(chain_id).checksum
+            self.router_address = router_addr
+            self.router = web3.eth.contract(address=router_addr, abi=UNISWAP_V2_ROUTER_ABI)
 
     def build_dex_swap(
         self,
@@ -101,9 +142,21 @@ class TxBuilder:
         recipient = self.account.address
         path = [token_in.address.checksum, token_out.address.checksum]
 
-        fn = self.router.functions.swapExactTokensForTokens(
-            amount_in_wei, amount_out_min_wei, path, recipient, deadline,
-        )
+        if self.dex_version == 'v3':
+            params = (
+                token_in.address.checksum,
+                token_out.address.checksum,
+                self.fee_tier,
+                recipient,
+                amount_in_wei,
+                amount_out_min_wei,
+                0,  # sqrtPriceLimitX96=0 disables price-limit guard; rely on amountOutMinimum.
+            )
+            fn = self.router.functions.exactInputSingle(params)
+        else:
+            fn = self.router.functions.swapExactTokensForTokens(
+                amount_in_wei, amount_out_min_wei, path, recipient, deadline,
+            )
 
         nonce = self.web3.eth.get_transaction_count(recipient)
         base_fee = self.web3.eth.gas_price

@@ -11,7 +11,8 @@ Three layers of stopping power:
 import logging
 import os
 import time
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
@@ -62,12 +63,22 @@ def safety_check(
 @dataclass
 class AutoKillSwitch:
     """Trips the bot programmatically. Caller checks `triggered` each tick."""
-    triggered:        bool             = False
-    reason:           Optional[str]    = None
-    triggered_at:     Optional[float]  = None
-    error_count_1h:   int              = 0
-    capital_floor_pct: Decimal          = Decimal('0.5')   # trip if capital < 50% of initial
-    max_errors_1h:    int              = 50
+    triggered:         bool            = False
+    reason:            Optional[str]   = None
+    triggered_at:      Optional[float] = None
+    capital_floor_pct: Decimal         = Decimal('0.5')
+    max_errors_1h:     int             = 50
+    _error_timestamps: deque           = field(default_factory=deque, init=False, repr=False)
+
+    @property
+    def error_count_1h(self) -> int:
+        self._prune_old_errors()
+        return len(self._error_timestamps)
+
+    def _prune_old_errors(self) -> None:
+        cutoff = time.time() - 3600
+        while self._error_timestamps and self._error_timestamps[0] < cutoff:
+            self._error_timestamps.popleft()
 
     def check(self, risk_manager) -> bool:
         """Re-evaluate against the live RiskManager. Returns triggered state."""
@@ -87,7 +98,7 @@ class AutoKillSwitch:
         return False
 
     def record_error(self) -> None:
-        self.error_count_1h += 1
+        self._error_timestamps.append(time.time())
 
     def trigger(self, reason: str) -> None:
         self.triggered = True
@@ -100,7 +111,7 @@ class AutoKillSwitch:
         self.triggered = False
         self.reason = None
         self.triggered_at = None
-        self.error_count_1h = 0
+        self._error_timestamps.clear()
 
 
 def write_heartbeat(path: str = "/tmp/arb_bot_heartbeat") -> None:

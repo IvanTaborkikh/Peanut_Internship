@@ -66,6 +66,11 @@ class ExecutorConfig:
     # Override via FeesConfig when wiring from BotConfig.
     cex_taker_bps: Decimal = Decimal('10')
     dex_swap_bps: Decimal = Decimal('30')
+    # Minimum acceptable expected_net_pnl when validating a signal in the
+    # executor. Default 0 preserves legacy behaviour ("no losing trades").
+    # Set to a small negative number to allow marginal trades during low-
+    # volatility / low-spread periods (e.g. -0.20 for $0.20 max accepted loss).
+    min_profit_usd: Decimal = Decimal('0')
 
 
 class Executor:
@@ -100,7 +105,7 @@ class Executor:
             return ctx
 
         ctx.state = ExecutorState.VALIDATING
-        if not signal.is_valid():
+        if not signal.is_valid(self.config.min_profit_usd):
             ctx.state = ExecutorState.REJECTED
             ctx.error = "Signal invalid"
             return ctx
@@ -273,13 +278,37 @@ class Executor:
             prepared = self.tx_builder.build_cex_order(
                 signal, self.config.slippage_bps, size=actual_size, order_type='limit',
             )
+            logger = __import__('logging').getLogger(__name__)
             if self.config.dry_run:
-                logger = __import__('logging').getLogger(__name__)
                 logger.info("DRY-RUN CEX LEG: %s %s %s @ %s",
                             prepared.side, prepared.amount, prepared.symbol, prepared.price)
                 return {'success': True, 'price': signal.cex_price, 'filled': actual_size,
                         'prepared': prepared}
-            raise NotImplementedError("CEX broadcast disabled — set dry_run=True")
+            logger.warning("LIVE CEX ORDER: %s %s %s @ %s",
+                           prepared.side, prepared.amount, prepared.symbol, prepared.price)
+            try:
+                result = self.exchange.create_limit_ioc_order(
+                    symbol=prepared.symbol,
+                    side=prepared.side,
+                    amount=float(prepared.amount),
+                    price=float(prepared.price) if prepared.price is not None else 0.0,
+                )
+            except Exception as e:
+                # Same rationale as DEX leg — never let a broker exception bubble
+                # up; outer try/except would skip the unwind path.
+                logger.error("CEX order submission failed: %s", e)
+                return {'success': False, 'error': f'cex submit failed: {e}',
+                        'prepared': prepared, 'price': signal.cex_price,
+                        'filled': Decimal('0')}
+            filled = Decimal(str(result.get('amount_filled', 0)))
+            avg = result.get('avg_fill_price')
+            return {
+                'success': result.get('status') == 'filled' and filled > 0,
+                'price': Decimal(str(avg)) if avg else signal.cex_price,
+                'filled': filled,
+                'error': result.get('status', 'unknown') if result.get('status') != 'filled' else None,
+                'prepared': prepared,
+            }
 
         # Legacy paths (kept so existing tests with simulation_mode still work).
         if self.config.simulation_mode:
@@ -303,27 +332,92 @@ class Executor:
             token_base = get_token(self.chain_id, base_sym)
             token_quote = get_token(self.chain_id, quote_sym)
 
-            if signal.direction == Direction.BUY_CEX_SELL_DEX:
-                token_in, token_out = token_base, token_quote
-            else:
-                token_in, token_out = token_quote, token_base
-
-            amount_in_wei = int(size * (10 ** token_in.decimals))
             slippage_factor = Decimal('1') - self.config.slippage_bps / Decimal('10000')
-            amount_out_min_wei = int(
-                size * signal.dex_price * (10 ** token_out.decimals) * slippage_factor
-            )
+            if signal.direction == Direction.BUY_CEX_SELL_DEX:
+                # Sell `size` base on DEX → receive ~size×price quote.
+                token_in, token_out = token_base, token_quote
+                amount_in_wei = int(size * (10 ** token_in.decimals))
+                amount_out_min_wei = int(
+                    size * signal.dex_price * (10 ** token_out.decimals) * slippage_factor
+                )
+            else:
+                # Buy `size` base on DEX → spend ~size×price quote.
+                # `size` is in BASE units; convert to QUOTE for amount_in.
+                token_in, token_out = token_quote, token_base
+                amount_in_wei = int(
+                    size * signal.dex_price * (10 ** token_in.decimals)
+                )
+                amount_out_min_wei = int(
+                    size * (10 ** token_out.decimals) * slippage_factor
+                )
 
-            prepared = self.tx_builder.build_dex_swap(
-                token_in, token_out, amount_in_wei, amount_out_min_wei,
-            )
+            logger = __import__('logging').getLogger(__name__)
+            try:
+                prepared = self.tx_builder.build_dex_swap(
+                    token_in, token_out, amount_in_wei, amount_out_min_wei,
+                )
+            except Exception as e:
+                # web3.py runs eth_call during build_transaction for gas
+                # estimation. If the swap would revert (e.g. "Too little
+                # received" from too-tight slippage), it raises here BEFORE
+                # we even attempt the broadcast. Caught here so the executor
+                # treats it as a clean leg2 failure and triggers _unwind().
+                # (Bug #8 incident on 2026-05-10 21:47.)
+                logger.error("DEX build_swap failed: %s", e)
+                return {'success': False, 'error': f'build_swap failed: {e}'}
             if self.config.dry_run:
-                logger = __import__('logging').getLogger(__name__)
                 logger.info("DRY-RUN DEX LEG: tx_hash=%s gas=%s amountOutMin=%s",
                             prepared.tx_hash, prepared.gas, prepared.amount_out_min)
                 return {'success': True, 'price': signal.dex_price, 'filled': size,
                         'prepared': prepared}
-            raise NotImplementedError("DEX broadcast disabled — set dry_run=True")
+
+            # Live broadcast via TxBuilder's web3 instance. Synchronous send +
+            # poll for receipt; on Arbitrum this completes in ~1-3 seconds.
+            #
+            # CRITICAL: ALL exceptions here MUST be caught and converted to
+            # {success: False}. If we let a web3 exception bubble up, the outer
+            # try/except in execute() catches it as "Unexpected error" and goes
+            # to FAILED state — which BYPASSES the unwind logic, leaving the
+            # CEX leg unhedged. (Real incident on 2026-05-09 20:29.)
+            logger.warning("LIVE DEX BROADCAST: tx_hash=%s amountIn=%s amountOutMin=%s",
+                           prepared.tx_hash, prepared.amount_in, prepared.amount_out_min)
+            web3 = self.tx_builder.web3
+            try:
+                raw_bytes = bytes.fromhex(prepared.raw_tx[2:] if prepared.raw_tx.startswith('0x') else prepared.raw_tx)
+                tx_hash = web3.eth.send_raw_transaction(raw_bytes)
+                tx_hash_hex = tx_hash.hex()
+                if not tx_hash_hex.startswith('0x'):
+                    tx_hash_hex = '0x' + tx_hash_hex
+            except Exception as e:
+                # Common: pre-flight revert (e.g. STF on insufficient balance/allowance).
+                # Returning success=False triggers _unwind on the CEX leg.
+                logger.error("DEX broadcast failed pre-mine: %s", e)
+                return {'success': False, 'error': f'broadcast failed: {e}'}
+
+            # Poll for receipt within leg2_timeout. asyncio.sleep yields to the
+            # loop so other coroutines (heartbeat etc.) keep running.
+            from web3.exceptions import TransactionNotFound
+            deadline = time.time() + self.config.leg2_timeout
+            receipt = None
+            while time.time() < deadline:
+                try:
+                    receipt = web3.eth.get_transaction_receipt(tx_hash_hex)
+                    if receipt is not None:
+                        break
+                except TransactionNotFound:
+                    pass
+                except Exception as e:
+                    logger.warning("receipt poll error: %s", e)
+                await asyncio.sleep(1.0)
+
+            if receipt is None:
+                return {'success': False, 'error': f'tx not mined within timeout: {tx_hash_hex}'}
+            if receipt.get('status') != 1:
+                return {'success': False, 'error': f'tx reverted: {tx_hash_hex}'}
+
+            logger.info("DEX swap confirmed: %s in block %s", tx_hash_hex, receipt.get('blockNumber'))
+            return {'success': True, 'price': signal.dex_price, 'filled': size,
+                    'prepared': prepared, 'tx_hash': tx_hash_hex}
 
         # Legacy path.
         if self.config.simulation_mode:

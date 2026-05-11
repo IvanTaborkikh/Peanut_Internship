@@ -1,0 +1,23 @@
+2026-05-04 13:00:07,782 | INFO | Logging to file: logs/bot_20260504_130007.log
+2026-05-04 13:00:07,782 | INFO | Loading config: configs/chip_observe.yaml
+2026-05-04 13:00:09,371 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-04 13:00:09,383 | INFO | Checking exchange connection...
+2026-05-04 13:00:09,647 | INFO | Connected to exchange. Server time: 1777888809548
+2026-05-04 13:00:09,656 | INFO | DEX engine: Uniswap V3 (fee_tier=100)
+2026-05-04 13:00:09,662 | WARNING | PRODUCTION MODE (dry_run=True — no real trades)
+2026-05-04 13:00:09,662 | INFO | Bot starting | pairs=['CHIP/USDC'] | risk={'capital': '100', 'peak': '100', 'daily_pnl': '0', 'drawdown': '0.0%', 'consec_loss': 0, 'tph': 0}
+2026-05-04 13:00:13,626 | INFO | API key is valid (expiration unknown).
+2026-05-04 13:00:14,145 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 13:00:14,148 | INFO | Start polling
+2026-05-04 13:00:14,197 | INFO | Run polling for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-04 13:00:14,410 | INFO | fetch_order_book: mid=0.059255 spread=5.06bps bids=20 asks=20
+2026-05-04 13:00:15,604 | INFO | SPREAD | pair=CHIP/USDC | cex=0.05924/0.05927 | dex_sell=0.0592601 dex_buy=0.0592882 | spread_a=-1.7bps spread_b=-8.1bps | min=30.0bps
+2026-05-04 13:00:16,605 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 13:00:16,870 | INFO | fetch_order_book: mid=0.059255 spread=5.06bps bids=20 asks=20
+2026-05-04 13:00:17,919 | INFO | SPREAD | pair=CHIP/USDC | cex=0.05924/0.05927 | dex_sell=0.0592601 dex_buy=0.0592882 | spread_a=-1.7bps spread_b=-8.1bps | min=30.0bps
+2026-05-04 13:00:18,921 | CRITICAL | KILL SWITCH ACTIVE — stopping bot
+2026-05-04 13:00:19,922 | INFO | Polling stopped
+2026-05-04 13:00:19,925 | ERROR | Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-05-04 13:00:19,925 | WARNING | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8642945117)
+2026-05-04 13:00:20,637 | INFO | Bot stopped.
+2026-05-04 13:00:20,637 | INFO | Polling stopped for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
