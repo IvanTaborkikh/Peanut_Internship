@@ -24,7 +24,7 @@ live operation with $100 real capital.
 - 0 production incidents that bypassed risk limits
 - 0 funds lost to bugs (manual recovery available in all cases)
 
-**Honest framing**: 8 unrealized USD of profit is largely luck (CHIP pumped
+**Honest framing**: 5 unrealized USD of profit is largely luck (CHIP pumped
 20% mid-week). The arbitrage system itself broke even-to-slightly-down in
 realized terms. The value delivered isn't dollars — it's a hardened code
 path, a thorough understanding of why each piece can fail in production, and
