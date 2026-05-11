@@ -16,7 +16,7 @@ live operation with $100 real capital.
 
 **Headline numbers**:
 - 10 distinct bugs found and fixed (all but 4 invisible in dry-run)
-- 2 fully completed real arbitrage cycles end-to-end
+- 1 fully completed real arbitrage cycles end-to-end
 - 1 leg-2 failure recovered automatically by auto-unwind
 - 2 leg-2 failures recovered manually (before auto-unwind was implemented)
 - Realized trading PnL: **−$0.30 over 4 trade attempts** (well within `max_daily_loss=$15`)
