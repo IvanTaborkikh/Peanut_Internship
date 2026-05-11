@@ -1,13 +1,12 @@
-# CHIP arb observation: Binance CHIP/USDT (mainnet) ↔ Uniswap V3 CHIP/USDC (Arbitrum).
+# CHIP arb live config: Binance CHIP/USDC (mainnet) ↔ Uniswap V3 CHIP/USDC (Arbitrum).
 #
-# CEX side is denominated in USDT, DEX side in USDC. dex_quote_override + the
-# StablecoinConverter pull the live USDC/USDT rate from Binance so the spread
-# isn't polluted by a 5-10 bps stablecoin drift.
+# Both legs quote in USDC — no stablecoin drift, no override needed.
 #
-# dry_run=true and the executor's hardcoded simulation_mode prevent any real
-# broadcast. Run: make dry-run-chip
+# Set `dry_run: false` to enable real broadcasting once allowances are granted
+# (see scripts/grant_v3_allowances.py). Run dry-run smoke first: make dry-run-chip
 mode: prod
-dry_run: true
+# Day 4: live trading, max $15/trade per assignment rules.
+dry_run: false
 
 cex:
   exchange: binance
@@ -27,30 +26,42 @@ dex:
   version:  v3
   fee_tier: 100        # 0.01% — most liquid V3 pool for CHIP/USDC
 
-# CEX pair quote is USDT, but Uniswap V3 CHIP pool is paired with USDC.
+# Both CEX and DEX use USDC — no override needed.
 dex_quote_override: {}
 
-
+# Both legs are USDC; the live ratio adapter is unnecessary.
 stablecoin_converter: false
 
-# Single CHIP pair. trade_size=250 ≈ $15 at $0.06/CHIP.
-# pool_address is unused for V3 (Quoter routes internally) but kept as
-# empty string for schema consistency.
+# Day 4: trade_size=200 CHIP. At CHIP $0.062, this is $12.4 — under $15
+# with buffer up to $0.075 before re-tuning is needed. Bigger size cuts
+# gas-share from 80 bps (Day 3) to ~40-65 bps, narrowing breakeven.
 pairs:
   - pair: CHIP/USDC
     chain_id: 42161
     pool_address: ""
-    trade_size: "250"
+    trade_size: "200"
 
 fees:
   cex_taker_bps: "10"
   cex_maker_bps: "2"
   dex_swap_bps:  "1"      # 0.01% V3 fee
-  gas_cost_usd_default: "0.5"
+  # Real Arbitrum gas measured by smoke_dex_round_trip.py on 2026-05-10:
+  # gas_used=175698, gas_price=20006000 wei → 0.0000035 ETH ≈ $0.012 per swap.
+  # Bumped to $0.03 for safety margin (peak gas spikes can hit 2-3x baseline).
+  # Was 0.10 (own conservative estimate) — overstating cost rejected signals
+  # that were actually profitable.
+  gas_cost_usd_default: "0.03"
 
 signal:
+  # Day 4: keeping min_spread at 30 bps. Observed 4-5 spread events of
+  # 30-86 bps over Day 2-3, so threshold gives ~1 signal per 2-4 hours.
+  # At trade_size=200 (~$12.4), breakeven is ~60-100 bps depending on real
+  # gas — so 30 bps signals expected to lose -$0.04..-$0.09. Within tightened
+  # min_profit_usd=-0.15 filter. DoD focus: capture trades for round-trips.
   min_spread_bps:    "30"
-  min_profit_usd:    "0.05"
+  # Day 4 tightened from -0.20 to -0.15 — bigger trade size means a fixed
+  # gas $ becomes a smaller bps cost, so we expect smaller per-trade losses.
+  min_profit_usd:    "-0.15"
   max_position_usd:  "100"
   signal_ttl_seconds: 5.0
   cooldown_seconds:   3.0
@@ -60,16 +71,21 @@ executor:
   leg1_timeout_seconds: 5.0
   leg2_timeout_seconds: 60.0
   min_fill_ratio:       "0.8"
-  slippage_bps:         "50"
+  # Bumped 50 → 100 bps after Bug #8: CHIP V3 pool with 99% LP concentration
+  # moves price 5-15 bps per swap, plus 1s gap between observation and broadcast
+  # often shifts price 20-50 bps in volatile periods. 100 bps gives reliable
+  # fill rate at the cost of $0.12 max-slip on a $12 trade.
+  slippage_bps:         "100"
   use_flashbots:        false
 
 risk:
   initial_capital_usd:    "100"
+  # Day 4: $15/trade per assignment rules.
   max_trade_usd:          "15"
   max_trade_pct:          "0.20"
   max_position_per_token: "30"
   max_open_positions:     1
-  max_loss_per_trade:     "5"
+  max_loss_per_trade:     "4"
   max_daily_loss:         "15"
   max_drawdown_pct:       "0.20"
   max_trades_per_hour:    20

@@ -51,6 +51,15 @@ UNISWAP_V2_FACTORIES: dict[ChainId, Address] = {
 }
 
 
+# Uniswap V3 SwapRouter02. Same canonical address on Ethereum mainnet and
+# every L2 (Arbitrum, Optimism, Polygon, Base) — Uniswap deploys at the
+# same deterministic address across chains.
+UNISWAP_V3_ROUTERS: dict[ChainId, Address] = {
+    ChainId.ETH_MAINNET: Address('0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'),
+    ChainId.ARBITRUM:    Address('0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'),
+}
+
+
 def get_token(chain_id: ChainId, symbol: str) -> Token:
     chain_tokens = TOKENS.get(chain_id)
     if chain_tokens is None:
@@ -74,3 +83,10 @@ def get_factory(chain_id: ChainId) -> Address:
     if factory is None:
         raise KeyError(f"no Uniswap V2 factory configured for chain {chain_id.name}")
     return factory
+
+
+def get_v3_router(chain_id: ChainId) -> Address:
+    router = UNISWAP_V3_ROUTERS.get(chain_id)
+    if router is None:
+        raise KeyError(f"no Uniswap V3 router configured for chain {chain_id.name}")
+    return router

@@ -1,0 +1,26 @@
+2026-05-04 14:25:32,671 | INFO | Logging to file: logs/bot_20260504_142532.log
+2026-05-04 14:25:32,671 | INFO | Loading config: configs/chip_observe.yaml
+2026-05-04 14:25:33,286 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-04 14:25:33,300 | INFO | Checking exchange connection...
+2026-05-04 14:25:33,563 | INFO | Connected to exchange. Server time: 1777893933488
+2026-05-04 14:25:33,574 | INFO | DEX engine: Uniswap V3 (fee_tier=100)
+2026-05-04 14:25:33,581 | WARNING | PRODUCTION MODE (dry_run=True — no real trades)
+2026-05-04 14:25:33,581 | INFO | Bot starting | pairs=['CHIP/USDC'] | risk={'capital': '100', 'peak': '100', 'daily_pnl': '0', 'drawdown': '0.0%', 'consec_loss': 0, 'tph': 0}
+2026-05-04 14:25:37,445 | INFO | API key is valid (expiration unknown).
+2026-05-04 14:25:37,893 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 14:25:37,895 | INFO | Start polling
+2026-05-04 14:25:37,940 | INFO | Run polling for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-04 14:25:38,163 | INFO | fetch_order_book: mid=0.05855 spread=6.83bps bids=20 asks=20
+2026-05-04 14:25:39,192 | INFO | SPREAD | pair=CHIP/USDC | cex=0.05853/0.05857 | dex_sell=0.0585591 dex_buy=0.0585867 | spread_a=-1.9bps spread_b=-9.7bps | min=30.0bps
+2026-05-04 14:25:40,194 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 14:25:40,461 | INFO | fetch_order_book: mid=0.058555 spread=5.12bps bids=20 asks=20
+2026-05-04 14:25:41,448 | INFO | SPREAD | pair=CHIP/USDC | cex=0.05854/0.05857 | dex_sell=0.0585591 dex_buy=0.0585867 | spread_a=-1.9bps spread_b=-8.0bps | min=30.0bps
+2026-05-04 14:25:42,450 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-04 14:25:42,718 | INFO | fetch_order_book: mid=0.05855 spread=6.83bps bids=20 asks=20
+2026-05-04 14:25:43,710 | INFO | SPREAD | pair=CHIP/USDC | cex=0.05853/0.05857 | dex_sell=0.0585591 dex_buy=0.0585867 | spread_a=-1.9bps spread_b=-9.7bps | min=30.0bps
+2026-05-04 14:25:44,712 | CRITICAL | KILL SWITCH ACTIVE — stopping bot
+2026-05-04 14:25:45,714 | INFO | Polling stopped
+2026-05-04 14:25:45,716 | ERROR | Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-05-04 14:25:45,716 | WARNING | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8642945117)
+2026-05-04 14:25:46,381 | INFO | Bot stopped.
+2026-05-04 14:25:46,381 | INFO | Polling stopped for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'

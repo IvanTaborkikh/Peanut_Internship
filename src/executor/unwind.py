@@ -109,7 +109,27 @@ async def _unwind_cex(
         )
         return UnwindResult(success=True, prepared_order=order)
 
-    raise NotImplementedError("CEX unwind broadcast disabled — set dry_run=True")
+    # LIVE unwind — market order to flatten the stuck leg-1 position.
+    # Don't raise on failure: the caller catches and records UNWIND_FAILED,
+    # which already alerts the operator.
+    logger.warning("LIVE UNWIND CEX MARKET: %s %s %s",
+                   order.side, order.amount, order.symbol)
+    try:
+        result = exchange_client.create_market_order(
+            symbol=order.symbol,
+            side=order.side,
+            amount=float(order.amount),
+        )
+        filled = float(result.get('amount_filled', 0))
+        if result.get('status') == 'filled' and filled > 0:
+            logger.warning("UNWIND CEX OK: filled=%s", filled)
+            return UnwindResult(success=True, prepared_order=order)
+        return UnwindResult(success=False, prepared_order=order,
+                            error=f"unwind not filled: status={result.get('status')} filled={filled}")
+    except Exception as e:
+        logger.exception("UNWIND CEX FAILED")
+        return UnwindResult(success=False, prepared_order=order,
+                            error=f"unwind submit failed: {e}")
 
 
 async def _unwind_dex(
@@ -150,4 +170,44 @@ async def _unwind_dex(
         )
         return UnwindResult(success=True, prepared_tx=prepared)
 
-    raise NotImplementedError("DEX unwind broadcast disabled — set dry_run=True")
+    # LIVE unwind — broadcast and wait for receipt.
+    logger.warning("LIVE UNWIND DEX BROADCAST: tx_hash=%s amountIn=%s",
+                   prepared.tx_hash, prepared.amount_in)
+    web3 = tx_builder.web3
+    try:
+        raw_bytes = bytes.fromhex(prepared.raw_tx[2:] if prepared.raw_tx.startswith('0x') else prepared.raw_tx)
+        tx_hash = web3.eth.send_raw_transaction(raw_bytes)
+        tx_hash_hex = tx_hash.hex()
+        if not tx_hash_hex.startswith('0x'):
+            tx_hash_hex = '0x' + tx_hash_hex
+    except Exception as e:
+        logger.exception("UNWIND DEX broadcast pre-mine failed")
+        return UnwindResult(success=False, prepared_tx=prepared,
+                            error=f"unwind broadcast failed: {e}")
+
+    # Poll for receipt — same pattern as engine._execute_dex_leg.
+    import asyncio as _asyncio
+    import time as _time
+    from web3.exceptions import TransactionNotFound
+    deadline = _time.time() + 60
+    receipt = None
+    while _time.time() < deadline:
+        try:
+            receipt = web3.eth.get_transaction_receipt(tx_hash_hex)
+            if receipt is not None:
+                break
+        except TransactionNotFound:
+            pass
+        except Exception as e:
+            logger.warning("unwind receipt poll error: %s", e)
+        await _asyncio.sleep(1.0)
+
+    if receipt is None:
+        return UnwindResult(success=False, prepared_tx=prepared,
+                            error=f"unwind tx not mined: {tx_hash_hex}")
+    if receipt.get('status') != 1:
+        return UnwindResult(success=False, prepared_tx=prepared,
+                            error=f"unwind tx reverted: {tx_hash_hex}")
+
+    logger.warning("UNWIND DEX OK: %s in block %s", tx_hash_hex, receipt.get('blockNumber'))
+    return UnwindResult(success=True, prepared_tx=prepared)

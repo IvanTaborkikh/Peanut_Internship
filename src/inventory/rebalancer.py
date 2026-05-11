@@ -211,9 +211,13 @@ class RebalancePlanner:
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    import os
     import sys
     import logging
     logging.basicConfig(level=logging.WARNING)
+
+    from dotenv import load_dotenv
+    load_dotenv()
 
     from src.config import BINANCE_CONFIG
     from src.exchange.client import ExchangeClient
@@ -221,12 +225,46 @@ if __name__ == '__main__':
     client  = ExchangeClient(BINANCE_CONFIG)
     tracker = InventoryTracker(venues=[Venue.BINANCE, Venue.WALLET])
 
-    # Load real Binance balances + simulated wallet
+    # Load real balances from both venues.
     tracker.update_from_cex(Venue.BINANCE, client.fetch_balance())
-    tracker.update_from_wallet(Venue.WALLET, {
-        'ETH':  Decimal('5'),
-        'USDC': Decimal('3000'),
-    })
+
+    # Real on-chain wallet balances via web3 (same approach as
+    # scripts/arb_bot.py:_fetch_wallet_balances). Reads PRIVATE_KEY +
+    # ARBITRUM_RPC_URL from env; falls back to empty wallet on misconfig.
+    wallet_balances: dict = {}
+    pk = os.getenv('PRIVATE_KEY')
+    rpc = os.getenv('ARBITRUM_RPC_URL')
+    if pk and rpc:
+        from web3 import Web3
+        from eth_account import Account
+        from src.configs.tokens import get_token
+        from src.configs.schema import ChainId
+
+        erc20_abi = [{
+            'name': 'balanceOf', 'type': 'function', 'stateMutability': 'view',
+            'inputs': [{'type': 'address', 'name': 'owner'}],
+            'outputs': [{'type': 'uint256'}],
+        }]
+        w3 = Web3(Web3.HTTPProvider(rpc))
+        addr = Account.from_key(pk).address
+        try:
+            wallet_balances['ETH'] = float(
+                Decimal(str(w3.eth.get_balance(addr))) / Decimal('1000000000000000000')
+            )
+        except Exception:
+            pass
+        for sym in ('USDC', 'CHIP'):
+            try:
+                token = get_token(ChainId.ARBITRUM, sym)
+                contract = w3.eth.contract(address=token.address.checksum, abi=erc20_abi)
+                raw = contract.functions.balanceOf(addr).call()
+                wallet_balances[sym] = float(
+                    Decimal(str(raw)) / Decimal(10 ** token.decimals)
+                )
+            except Exception:
+                pass
+
+    tracker.update_from_wallet(Venue.WALLET, wallet_balances)
 
     planner = RebalancePlanner(tracker)
     W = 43
