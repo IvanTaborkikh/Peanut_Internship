@@ -1,0 +1,15 @@
+2026-05-11 13:13:20,486 | INFO | Logging to file: logs/bot_20260511_131320.log
+2026-05-11 13:13:20,486 | INFO | Loading config: configs/chip_observe.yaml
+2026-05-11 13:13:21,213 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-11 13:13:21,227 | INFO | Checking exchange connection...
+2026-05-11 13:13:21,507 | INFO | Connected to exchange. Server time: 1778498001463
+2026-05-11 13:13:21,518 | INFO | DEX engine: Uniswap V3 (fee_tier=100)
+2026-05-11 13:13:21,525 | INFO | TxBuilder wired: address=0x84b7346c733Daa8c189e1f31d574087971e5cD7a dex=v3 fee_tier=100
+2026-05-11 13:13:21,534 | WARNING | ⚠️  PRODUCTION MODE — REAL MONEY ⚠️
+2026-05-11 13:13:21,534 | INFO | Bot starting | pairs=['CHIP/USDC'] | risk={'capital': '100', 'peak': '100', 'daily_pnl': '0', 'drawdown': '0.0%', 'consec_loss': 0, 'tph': 0}
+2026-05-11 13:13:21,843 | CRITICAL | API KEY INVALID — refusing to start: fetch_balance failed: binance {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}
+2026-05-11 13:13:22,223 | ERROR | Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13562d160>
+2026-05-11 13:13:22,223 | ERROR | Unclosed connector
+connections: ['deque([(<aiohttp.client_proto.ResponseHandler object at 0x1245ceed0>, 642600.3112375)])']
+connector: <aiohttp.connector.TCPConnector object at 0x13562c6e0>

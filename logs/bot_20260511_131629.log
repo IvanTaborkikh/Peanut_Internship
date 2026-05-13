@@ -1,0 +1,23 @@
+2026-05-11 13:16:29,677 | INFO | Logging to file: logs/bot_20260511_131629.log
+2026-05-11 13:16:29,677 | INFO | Loading config: configs/chip_observe.yaml
+2026-05-11 13:16:30,434 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-11 13:16:30,446 | INFO | Checking exchange connection...
+2026-05-11 13:16:30,714 | INFO | Connected to exchange. Server time: 1778498190675
+2026-05-11 13:16:30,729 | INFO | DEX engine: Uniswap V3 (fee_tier=100)
+2026-05-11 13:16:30,734 | INFO | TxBuilder wired: address=0x84b7346c733Daa8c189e1f31d574087971e5cD7a dex=v3 fee_tier=100
+2026-05-11 13:16:30,741 | WARNING | ⚠️  PRODUCTION MODE — REAL MONEY ⚠️
+2026-05-11 13:16:30,741 | INFO | Bot starting | pairs=['CHIP/USDC'] | risk={'capital': '100', 'peak': '100', 'daily_pnl': '0', 'drawdown': '0.0%', 'consec_loss': 0, 'tph': 0}
+2026-05-11 13:16:35,237 | INFO | API key is IP-whitelisted — no expiration.
+2026-05-11 13:16:36,796 | INFO | Wallet balances: {'ETH': 0.000969800442162, 'CHIP': 390.7702315629226, 'USDC': 30.362005}
+2026-05-11 13:16:37,022 | INFO | fetch_order_book: symbol=CHIP/USDC limit=20
+2026-05-11 13:16:37,022 | INFO | Start polling
+2026-05-11 13:16:37,073 | INFO | Run polling for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-11 13:16:37,299 | INFO | fetch_order_book: mid=0.06392 spread=6.26bps bids=20 asks=20
+2026-05-11 13:16:37,309 | INFO | Update id=722886006 is handled. Duration 187 ms by bot id=8642945117
+2026-05-11 13:16:37,309 | WARNING | Received SIGTERM — shutting down.
+2026-05-11 13:16:37,309 | INFO | Polling stopped
+2026-05-11 13:16:37,311 | ERROR | Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-05-11 13:16:37,311 | WARNING | Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8642945117)
+2026-05-11 13:16:37,755 | INFO | Bot stopped.
+2026-05-11 13:16:37,756 | INFO | Polling stopped for bot @arb_bot_peanutbot id=8642945117 - 'arb_bot_peanut'
+2026-05-11 13:16:38,451 | INFO | SPREAD | pair=CHIP/USDC | cex=0.0639/0.06394 | dex_sell=0.0638667 dex_buy=0.0638926 | spread_a=-11.5bps spread_b=1.2bps | min=30.0bps
