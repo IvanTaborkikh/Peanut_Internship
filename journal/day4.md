@@ -8,7 +8,7 @@
   - 12:22: signal generated, CEX submission timed out 42s (network), no order placed
   - 21:47: CEX leg filled, DEX leg reverted (Bug #8) → manual recovery
 - Win rate: 0% (no clean round-trip)
-- Best trade: N/A (none completed)+$0.006 (Bug #8 incident: bought 200 CHIP \$0.06441 / sold 200 CHIP \$0.0644)
+- Best trade: N/A (none completed) — Bug #8 incident: bought 200 CHIP @$0.06475 / sold 200 CHIP @$0.0644 → −$0.10 net (manual recovery, not a completed arb)
 - Worst trade: N/A (none completed)
 - Fees paid: 0,00003784 BNB (CEX) + 0.000003515014188 ETH
 
@@ -21,7 +21,7 @@
   - CEX leg DONE: bought 200 CHIP on Binance for $12.95 USDC
   - DEX leg REVERTED: "Too little received" (output below `amount_out_min` set with 50 bps slippage)
   - Caught as "Unexpected error" by outer try/except (Bug #7 fix didn't cover this path because the exception came from `build_dex_swap` not from `send_raw_transaction`)
-  - Manual recovery: sold 200 CHIP back on Binance market at $0.0644 → +$0.10 net
+  - Manual recovery: sold 200 CHIP back on Binance market at $0.0644 → −$0.10 net (bought $12.95, recovered $12.88)
 - During Bug #8 audit found Bug #10: `_unwind_cex` and `_unwind_dex` raised `NotImplementedError` for live mode. This was the SILENT KILLER — every prior naked-position incident actually could have auto-recovered if unwind worked, but it was disabled in code from Week 4
 - Built `scripts/smoke_dex_round_trip.py` to verify entire DEX path against real chain without waiting for arb signal. Real swap sold 5 CHIP for $0.322 USDC:
   - Gas used 175,698 at 20 gwei = **$0.012** (8× cheaper than my $0.10 estimate)

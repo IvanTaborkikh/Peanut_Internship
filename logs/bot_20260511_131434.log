@@ -1,0 +1,8 @@
+2026-05-11 13:14:34,244 | INFO | Logging to file: logs/bot_20260511_131434.log
+2026-05-11 13:14:34,244 | INFO | Loading config: configs/chip_observe.yaml
+2026-05-11 13:14:35,571 | INFO | Rate limits loaded from exchangeInfo: 6000 weight / 60s
+2026-05-11 13:14:35,582 | INFO | Checking exchange connection...
+2026-05-11 13:14:35,853 | INFO | Connected to exchange. Server time: 1778498075814
+2026-05-11 13:14:35,866 | INFO | DEX engine: Uniswap V3 (fee_tier=100)
+2026-05-11 13:14:35,871 | INFO | TxBuilder wired: address=0x84b7346c733Daa8c189e1f31d574087971e5cD7a dex=v3 fee_tier=100
+2026-05-11 13:14:35,879 | CRITICAL | Kill switch file /tmp/arb_bot_kill still exists from a previous run. Remove it before starting:  rm /tmp/arb_bot_kill   (or: make unkill)

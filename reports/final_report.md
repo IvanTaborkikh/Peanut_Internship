@@ -19,7 +19,7 @@ live operation with $100 real capital.
 - 1 fully completed real arbitrage cycles end-to-end
 - 1 leg-2 failure recovered automatically by auto-unwind
 - 2 leg-2 failures recovered manually (before auto-unwind was implemented)
-- Realized trading PnL: **−$0.30 over 4 trade attempts** (well within `max_daily_loss=$15`)
+- Realized trading PnL: **−$0.27 over 3 genuine arb attempts** (Day 3 +$0.80 excluded — Bug #6 naked-short with lucky CHIP drop, not strategy PnL; well within `max_daily_loss=$15`)
 - Capital ended at ~\$105.45 (+$5.45 from start, mostly from CHIP price appreciation, partially from realized losses)
 - 0 production incidents that bypassed risk limits
 - 0 funds lost to bugs (manual recovery available in all cases)
@@ -67,15 +67,13 @@ for visibility.
 
 | Time (UTC) | Direction | Spread | Size | Outcome | Net PnL |
 |---|---|---|---|---|---|
-| Day 3, 18:29 | BUY_DEX_SELL_CEX | 30.8 bps | 130 CHIP | CEX leg filled, DEX revert (Bug #6), manual recovery | **+$0.80** (lucky CHIP drop) |
+| Day 3, 20:29 | BUY_DEX_SELL_CEX | 30.8 bps | 130 CHIP | CEX leg filled, DEX revert (Bug #6), manual recovery | **+$0.80** (lucky CHIP drop — bug, not arb) |
 | Day 4, 21:47 | BUY_CEX_SELL_DEX | 47.2 bps | 200 CHIP | CEX leg filled, DEX revert (Bug #8), manual recovery | **−$0.10** |
 | Day 5, 07:44 | BUY_DEX_SELL_CEX | 34.3 bps | 200 CHIP | **Full success — round-trip complete** | **−$0.04** |
 | Day 5, 08:50 | BUY_DEX_SELL_CEX | 57.4 bps | 200 CHIP | CEX leg filled, DEX revert, **auto-unwind succeeded** | **−$0.13** |
 
-**Total realized: −$0.30 across 4 trades.** Every trade generated some loss
-because (a) CHIP pool's small size means slippage during 1-2s broadcast lag
-often exceeds the captured spread, and (b) the first 2 trades' PnL is
-distorted by lucky/unlucky CHIP price movement during the unhedged window.
+**Total realized arb PnL: −$0.27 across 3 genuine arb attempts** (Day 4: −$0.10, Day 5: −$0.04 + −$0.13). Day 3's +$0.80 is excluded — it came from Bug #6 creating an accidental naked-short that happened to profit from a 7% CHIP drop, not from the arbitrage strategy.
+Every arb attempt generated a small loss because CHIP pool's small size means slippage during the 1-2s broadcast lag often exceeds the captured spread.
 
 ### Capital trajectory
 - Day 1 close: ~$99.8 and ~0.00099431 ETH
@@ -119,7 +117,7 @@ position. All recovered with capital intact:
 
 1. **Day 3 20:29 — Bug #6 (amount_in calc error)**: Bot sold 130 CHIP on
    Binance, DEX leg STF'd because tried to spend 130 USDC instead of 8.71.
-   Naked-short for ~5 minutes during which CHIP dropped 7%, netting +$0.80.
+   Naked-short for ~14 hours during which CHIP dropped 7%, netting +$0.80.
    Manual recovery: bought 130 CHIP back on Binance. **Lucky outcome — would
    normally lose \$0.10.**
 
